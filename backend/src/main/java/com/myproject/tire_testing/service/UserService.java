@@ -1,6 +1,6 @@
 package com.myproject.tire_testing.service;
 
-import com.myproject.tire_testing.model.User;
+import com.myproject.tire_testing.entity.User;          // ← fixed: was model.User
 import com.myproject.tire_testing.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,7 @@ public class UserService {
 
     public boolean login(String email, String password) {
         return repo.findByEmail(email)
-                .map(user -> encoder.matches(password, user.getPassword()))
+                .map(u -> encoder.matches(password, u.getPassword()))
                 .orElse(false);
     }
 }
