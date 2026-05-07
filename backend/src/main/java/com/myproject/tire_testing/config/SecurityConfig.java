@@ -1,4 +1,4 @@
-package com.myproject.tiretesting.config;
+package com.myproject.tire_testing.config;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -22,12 +22,14 @@ public class SecurityConfig {
 
         http
                 .csrf(csrf -> csrf.disable())
+
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
+
                 .authorizeHttpRequests(auth -> auth
 
-                        // Allow actuator endpoints
+                        // Actuator endpoints
                         .requestMatchers(
                                 "/actuator/health",
                                 "/actuator/info",
@@ -35,13 +37,21 @@ public class SecurityConfig {
                                 "/actuator/metrics"
                         ).permitAll()
 
-                        // Allow auth endpoints
+                        // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // Static resources
+                        // TEMP DEV ACCESS
+                        .requestMatchers(
+                                "/api/dashboard/**",
+                                "/api/tires/**",
+                                "/api/sessions/**"
+                        ).permitAll()
+
+                        // Static frontend resources
                         .requestMatchers(
                                 "/",
                                 "/index.html",
+                                "/favicon.svg",
                                 "/static/**",
                                 "/assets/**",
                                 "/*.js",
@@ -49,7 +59,7 @@ public class SecurityConfig {
                                 "/*.ico"
                         ).permitAll()
 
-                        // Everything else secured
+                        // All others require auth
                         .anyRequest().authenticated()
                 );
 

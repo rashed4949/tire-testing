@@ -1,20 +1,18 @@
-package com.myproject.tire_testing.config;
+package com.myproject.tiretesting.config;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 
-/**
- * Forwards all non-API, non-asset requests to React's index.html
- * so that React Router handles client-side navigation.
- */
 @Controller
 public class SpaController {
 
+    // Forward any path that doesn't contain a dot (i.e., not a file)
+    // and doesn't start with /api/ or /actuator/ to the React app
     @RequestMapping(value = {
-        "/login", "/dashboard", "/tires", "/tires/**",
-        "/sessions", "/sessions/**"
+            "/{path:[^\\.]*}",
+            "/{path:^(?!api|actuator).*$}/**"
     })
-    public String forwardToReact() {
+    public String forward() {
         return "forward:/index.html";
     }
 }

@@ -21,10 +21,15 @@ export const register = async (user: IUser): Promise<IUserResponse> => {
 };
 
 export const login = async (user: IUser): Promise<IUserResponse> => {
-    const response = await axios.post<IUserResponse>(API_URL + "login", user);
+    const response = await axios.post(API_URL + "login", user);
+
+    console.log("LOGIN RESPONSE:", response.data); // 👈 DEBUG
+
     if (response.data.token) {
         localStorage.setItem("user", JSON.stringify(response.data));
+        localStorage.setItem("token", response.data.token);
     }
+
     return response.data;
 };
 
