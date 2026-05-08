@@ -1,5 +1,7 @@
 package com.myproject.tire_testing.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -9,16 +11,22 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Global exception handler — catches unhandled exceptions thrown by controllers
- * and returns structured JSON instead of the default error page.
- * The Whitelabel HTML page is disabled via server.error.whitelabel.enabled=false.
- */
 @RestControllerAdvice
 public class ApiErrorController {
 
     @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException ex) {
+    public ResponseEntity<Map<String, Object>> handleNotFound(
+            NoResourceFoundException ex,
+            HttpServletRequest request,
+            HttpServletResponse response) throws Exception {
+
+        String path = request.getRequestURI();
+
+        if (!path.startsWith("/api/") && !path.startsWith("/actuator/")) {
+            request.getRequestDispatcher("/index.html").forward(request, response);
+            return null;
+        }
+
         return buildResponse(404, "Not Found", ex.getMessage());
     }
 

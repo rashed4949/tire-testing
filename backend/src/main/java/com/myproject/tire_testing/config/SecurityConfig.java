@@ -29,7 +29,6 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
 
-                        // Actuator endpoints
                         .requestMatchers(
                                 "/actuator/health",
                                 "/actuator/info",
@@ -37,29 +36,33 @@ public class SecurityConfig {
                                 "/actuator/metrics"
                         ).permitAll()
 
-                        // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // TEMP DEV ACCESS
                         .requestMatchers(
                                 "/api/dashboard/**",
                                 "/api/tires/**",
                                 "/api/sessions/**"
                         ).permitAll()
 
-                        // Static frontend resources
                         .requestMatchers(
                                 "/",
                                 "/index.html",
                                 "/favicon.svg",
                                 "/static/**",
                                 "/assets/**",
+                                "/login",
+                                "/dashboard",
+                                "/dashboard/**",
+                                "/tires",
+                                "/tires/**",
+                                "/sessions",
+                                "/sessions/**",
                                 "/*.js",
                                 "/*.css",
-                                "/*.ico"
+                                "/*.ico",
+                                "/*.svg"
                         ).permitAll()
 
-                        // All others require auth
                         .anyRequest().authenticated()
                 );
 

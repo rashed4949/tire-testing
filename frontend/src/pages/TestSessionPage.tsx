@@ -123,7 +123,6 @@ export default function TestSessionPage() {
         </CardContent>
       </Card>
 
-      {/* New Session Dialog */}
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>New Test Session</DialogTitle>
         <DialogContent>
@@ -150,7 +149,6 @@ export default function TestSessionPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Update Status Dialog */}
       <Dialog open={statusOpen} onClose={() => setStatusOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Update Session Status</DialogTitle>
         <DialogContent>
@@ -181,7 +179,6 @@ export default function TestSessionPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Confirm */}
       <Dialog open={delId !== null} onClose={() => setDelId(null)}>
         <DialogTitle>Delete Session?</DialogTitle>
         <DialogContent><Typography>This cannot be undone.</Typography></DialogContent>

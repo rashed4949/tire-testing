@@ -41,16 +41,15 @@ export default function Layout() {
       }}>
         {/* Logo */}
         <Box sx={{ p: 3, pb: 2 }}>
-          <Typography variant="h6" sx={{ color: '#FF6600', fontWeight: 800, letterSpacing: 1 }}>
+          <Typography variant="h6" sx={{ color: '#FFD100', fontWeight: 800, letterSpacing: 1 }}>
             🔧 TireTest
           </Typography>
           <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
-            Continental AG
+           ABC Tire Company
           </Typography>
         </Box>
         <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
 
-        {/* Navigation */}
         <List sx={{ pt: 2 }}>
           {navItems.map(item => {
             const active = location.pathname === item.path
@@ -64,11 +63,11 @@ export default function Layout() {
                     '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)' },
                   }}
                 >
-                  <ListItemIcon sx={{ color: active ? '#FF6600' : 'rgba(255,255,255,0.6)', minWidth: 40 }}>
+                  <ListItemIcon sx={{ color: active ? '#FFD100' : 'rgba(255,255,255,0.6)', minWidth: 40 }}>
                     {item.icon}
                   </ListItemIcon>
                   <ListItemText primary={item.label} primaryTypographyProps={{
-                    color: active ? '#FF6600' : 'rgba(255,255,255,0.85)',
+                    color: active ? '#FFD100' : 'rgba(255,255,255,0.85)',
                     fontWeight: active ? 600 : 400,
                     fontSize: 14,
                   }} />
@@ -79,9 +78,7 @@ export default function Layout() {
         </List>
       </Drawer>
 
-      {/* Main area */}
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-        {/* Top bar */}
         <AppBar position="static" elevation={0} sx={{
           background: '#fff',
           borderBottom: '1px solid #eee',
@@ -111,7 +108,6 @@ export default function Layout() {
           </Toolbar>
         </AppBar>
 
-        {/* Page content */}
         <Box sx={{ flexGrow: 1, p: 3, background: '#F5F6FA' }}>
           <Outlet />
         </Box>
