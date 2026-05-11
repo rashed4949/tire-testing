@@ -47,10 +47,6 @@ pipeline {
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    // This single command:
-                    // 1. frontend-maven-plugin: downloads Node, runs npm install, npm run build
-                    // 2. maven-resources-plugin: copies dist/ into JAR static resources
-                    // 3. spring-boot-maven-plugin: packages the fat JAR
                     sh "mvn versions:set -DnewVersion=0.0.${BUILD_NUMBER} -DgenerateBackupPoms=false -B"
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
@@ -60,21 +56,30 @@ pipeline {
                     }
                 }
 
+                // Push updated pom.xml back to git
+                withCredentials([usernamePassword(
+                        credentialsId: 'github-credentials',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                )]) {
+                    sh """
+                git config user.email "rrashed4@gmail.com"
+                git config user.name "rashed4949"
+                git add backend/pom.xml
+                git commit -m "ci: bump version to 0.0.${BUILD_NUMBER} [skip ci]"
+                git push https://\${GIT_USER}:\${GIT_TOKEN}@github.com/rashed4949/tire-testing.git HEAD:main
+            """
+                }
+
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
-
-                    // Get the actual version from pom.xml
                     dir('backend') {
                         env.APP_VERSION = sh(
                                 script: 'mvn help:evaluate -Dexpression=project.version -q -DforceStdout -B',
                                 returnStdout: true
                         ).trim()
                     }
-
                     echo "Build complete. Version: ${env.APP_VERSION}"
-                    echo "Build finished at: ${env.BUILD_END}"
-
-                    // Verify the JAR was created
                     sh "ls -lh backend/target/tire-testing-${env.APP_VERSION}.jar"
                 }
             }

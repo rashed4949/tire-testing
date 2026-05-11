@@ -12,7 +12,7 @@
 	<artifactId>tire-testing</artifactId>
 	<version>0.0.22</version>
 	<name>tire-testing</name>
-	<description>Tire Testing Management System — Continental AG</description>
+	<description>Tire Testing Management System — ABC company</description>
 
 	<properties>
 		<java.version>21</java.version>
