@@ -120,7 +120,7 @@ pipeline {
                 // Verify it's in Nexus
                 sh """
                   HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
-                    -u jenkins:jenkins_nexus123 \
+                    -u jenkins:Raizanhasan4949 \
                     "${NEXUS_URL}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar")
                   echo "Nexus verification: HTTP \$HTTP_CODE"
                   if [ "\$HTTP_CODE" != "200" ]; then
