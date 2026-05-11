@@ -51,6 +51,7 @@ pipeline {
                     // 1. frontend-maven-plugin: downloads Node, runs npm install, npm run build
                     // 2. maven-resources-plugin: copies dist/ into JAR static resources
                     // 3. spring-boot-maven-plugin: packages the fat JAR
+                    sh "mvn versions:set -DnewVersion=0.0.${BUILD_NUMBER} -DgenerateBackupPoms=false -B"
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
                             mavenLocalRepo: '/var/lib/jenkins/.m2/repository'
