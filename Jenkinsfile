@@ -63,13 +63,14 @@ pipeline {
                         passwordVariable: 'GIT_TOKEN'
                 )]) {
                     sh """
-                git config user.email "rrashed4@gmail.com"
-                git config user.name "rashed4949"
-                git add backend/pom.xml
-                git commit -m "ci: bump version to 0.0.${BUILD_NUMBER} [skip ci]"
-                git push https://\${GIT_USER}:\${GIT_TOKEN}@github.com/rashed4949/tire-testing.git HEAD:main
-            """
-                }
+                        git config user.email "rrashed4@gmail.com"
+                        git config user.name "rashed4949"
+                        git remote set-url origin https://\${GIT_USER}:\${GIT_TOKEN}@github.com/rashed4949/tire-testing.git
+                        git add backend/pom.xml
+                        git commit -m "ci: bump version to 0.0.${BUILD_NUMBER} [skip ci]"
+                        git push origin HEAD:main
+                    """
+                                }
 
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
