@@ -152,10 +152,10 @@ pipeline {
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
-                          root@${PUPPET_MASTER_IP} \
+                          node1@${PUPPET_MASTER_IP} \
                           "echo '---\\napp_version: \\'${env.APP_VERSION}\\'' \
-                          > /etc/puppetlabs/code/environments/production/hieradata/common.yaml \
-                          && cat /etc/puppetlabs/code/environments/production/hieradata/common.yaml \
+                          > /etc/puppet/code/environments/production/hieradata/common.yaml \
+                          && cat /etc/puppet/code/environments/production/hieradata/common.yaml \
                           && echo 'Hiera updated on Puppet Master'"
 
                       # ── Step 2: Trigger immediate Puppet run on VM3 ───────
@@ -164,7 +164,7 @@ pipeline {
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
-                          root@${PROD_IP} \
+                          node1@${PROD_IP} \
                           "timeout 120 /opt/puppetlabs/bin/puppet agent --test --no-daemonize \
                           && echo 'Puppet run complete' \
                           || echo 'Puppet agent exited with non-zero (may be normal if no changes)'"
