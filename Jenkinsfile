@@ -147,28 +147,22 @@ pipeline {
                         )
                 ]) {
                     sh """
-                      # ── Step 1: Update the version in Puppet Hiera ────────
-                      echo "Updating Hiera version to ${env.APP_VERSION}..."
-                      ssh -i \$SSH_KEY \
-                          -o StrictHostKeyChecking=no \
-                          -o ConnectTimeout=10 \
-                          node1@${PUPPET_MASTER_IP} \
-                          "echo '---\\napp_version: \\'${env.APP_VERSION}\\'' \
-                          > /etc/puppet/code/environments/production/hieradata/common.yaml \
-                          && cat /etc/puppet/code/environments/production/hieradata/common.yaml \
-                          && echo 'Hiera updated on Puppet Master'"
-
-                      # ── Step 2: Trigger immediate Puppet run on VM3 ───────
-                      # (bypasses the 30-minute polling interval)
-                      echo "Triggering Puppet agent run on VM3..."
-                      ssh -i \$SSH_KEY \
-                          -o StrictHostKeyChecking=no \
-                          -o ConnectTimeout=10 \
-                          node3@${PROD_IP} \
-                          "timeout 120 /opt/puppetlabs/bin/puppet agent --test --no-daemonize \
-                          && echo 'Puppet run complete' \
-                          || echo 'Puppet agent exited with non-zero (may be normal if no changes)'"
-                    """
+                          # ── Step 1: Update the version in Puppet Hiera ────────
+                          echo "Updating Hiera version to ${env.APP_VERSION}..."
+                          ssh -i \$SSH_KEY \
+                              -o StrictHostKeyChecking=no \
+                              -o ConnectTimeout=10 \
+                              node1@${PUPPET_MASTER_IP} \
+                              "sudo sh -c 'printf -- \\\"---\\\\napp_version: ${env.APP_VERSION}\\\\n\\\" > /etc/puppet/code/environments/production/hieradata/common.yaml && cat /etc/puppet/code/environments/production/hieradata/common.yaml && echo Hiera updated on Puppet Master'"
+                        
+                          # ── Step 2: Trigger immediate Puppet run on VM3 ───────
+                          echo "Triggering Puppet agent run on VM3..."
+                          ssh -i \$SSH_KEY \
+                              -o StrictHostKeyChecking=no \
+                              -o ConnectTimeout=10 \
+                              node3@${PROD_IP} \
+                              "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete"
+                        """
                 }
 
                 script {
