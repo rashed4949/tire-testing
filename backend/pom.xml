@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.myproject</groupId>
 	<artifactId>tire-testing</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.0.1</version>
 	<name>tire-testing</name>
 	<description>Tire Testing Management System — Continental AG</description>
 
