@@ -185,7 +185,7 @@ pipeline {
                       --max-time 5 \
                       --output /dev/null \
                       --write-out "%{http_code}" \
-                      http://${PROD_IP}:8080/actuator/health \
+                      http://${PROD_IP}:8081/actuator/health \
                       2>/dev/null || echo "000")
 
                     echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
@@ -211,7 +211,7 @@ pipeline {
 
                   echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
                   # Show the actual response for debugging
-                  curl -v http://${PROD_IP}:8080/actuator/health 2>&1 || true
+                  curl -v http://${PROD_IP}:8081/actuator/health 2>&1 || true
                   exit 1
                 """
             }
