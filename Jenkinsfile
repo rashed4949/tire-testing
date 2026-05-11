@@ -164,7 +164,7 @@ pipeline {
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
-                          node1@${PROD_IP} \
+                          node3@${PROD_IP} \
                           "timeout 120 /opt/puppetlabs/bin/puppet agent --test --no-daemonize \
                           && echo 'Puppet run complete' \
                           || echo 'Puppet agent exited with non-zero (may be normal if no changes)'"
