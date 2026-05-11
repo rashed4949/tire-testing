@@ -177,8 +177,8 @@ pipeline {
             steps {
                 sh """
                   echo "Verifying application health after deployment..."
-                  MAX_ATTEMPTS=36
-                  SLEEP_SECS=10
+                  MAX_ATTEMPTS=3
+                  SLEEP_SECS=5
 
                   for i in \$(seq 1 \$MAX_ATTEMPTS); do
                     HTTP_CODE=\$(curl -s \
