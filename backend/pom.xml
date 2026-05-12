@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.myproject</groupId>
 	<artifactId>tire-testing</artifactId>
-	<version>0.0.37</version>
+	<version>0.0.36</version>
 	<name>tire-testing</name>
 	<description>Tire Testing Management System — ABC Tire company</description>
 
