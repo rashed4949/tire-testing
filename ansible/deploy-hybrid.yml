@@ -1,0 +1,91 @@
+---
+# Deploy Tire Testing — Modern Hybrid Pipeline
+# This playbook runs on the Prod EC2 via SSH from Jenkins EC2
+
+- name: Deploy Tire Testing Application
+  hosts: hybrid-prod
+  become: yes
+
+  vars:
+    # These are passed from Jenkins as --extra-vars
+    ecr_registry: ""        # e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com
+    image_name: "tire-testing"
+    image_tag: "latest"
+    aws_region: "eu-central-1"
+    db_url: ""
+    db_user: "tire_user"
+    db_password: ""
+
+  tasks:
+
+    - name: "Step 1 — Authenticate Docker with AWS ECR"
+      shell: |
+        aws ecr get-login-password --region {{ aws_region }} \
+          | docker login --username AWS \
+          --password-stdin {{ ecr_registry }}
+      changed_when: true
+      # Jenkins EC2 has IAM role, Prod EC2 needs AWS CLI installed (done in user_data)
+
+    - name: "Step 2 — Pull new Docker image from ECR"
+      community.docker.docker_image:
+        name: "{{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+        source: pull
+        force_source: yes
+      register: pull_result
+
+    - name: "Step 3 — Stop and remove old container (if exists)"
+      community.docker.docker_container:
+        name: tire-testing
+        state: absent
+        force_kill: yes
+      ignore_errors: yes    # Container may not exist on first deployment
+
+    - name: "Step 4 — Start new container"
+      community.docker.docker_container:
+        name: tire-testing
+        image: "{{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "8080:8080"    # React frontend + REST API
+          - "8081:8081"    # Actuator (health + Prometheus)
+        env:
+          # Database — RDS endpoint from Terraform output
+          DB_URL:      "{{ db_url }}"
+          DB_USER:     "{{ db_user }}"
+          DB_PASSWORD: "{{ db_password }}"
+          # Spring Boot config via environment
+          SPRING_JPA_HIBERNATE_DDL_AUTO:                "update"
+          MANAGEMENT_SERVER_PORT:                        "8081"
+          MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:     "health,info,prometheus,metrics"
+          MANAGEMENT_ENDPOINT_PROMETHEUS_ENABLED:        "true"
+          MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:       "always"
+          LOGGING_LEVEL_ROOT:                            "INFO"
+
+    - name: "Step 5 — Wait for application health check"
+      uri:
+        url: "http://{{ inventory_hostname }}:8081/actuator/health"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: health_result
+      retries: 36          # 36 × 10 seconds = 6 minutes max
+      delay: 10
+      until: health_result.status == 200
+      changed_when: false
+
+    - name: "Step 6 — Verify React frontend is served"
+      uri:
+        url: "http://{{ inventory_hostname }}:8080/"
+        method: GET
+        status_code: 200
+      register: ui_result
+      changed_when: false
+
+    - name: "Show deployment result"
+      debug:
+        msg:
+          - "✓ Application deployed successfully!"
+          - "  Image: {{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+          - "  Health: {{ health_result.json.status }}"
+          - "  Frontend HTTP: {{ ui_result.status }}"
