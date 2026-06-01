@@ -180,7 +180,7 @@ pipeline {
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
-                          node4@${STAGING_IP} \
+                          node3@${STAGING_IP} \
                           "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete on staging"
                     """
                 }
