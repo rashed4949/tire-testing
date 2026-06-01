@@ -7,6 +7,16 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
+    parameters {
+        choice(
+                name: 'BUILD_MODE',
+                choices: ['AUTO', 'SNAPSHOT', 'RELEASE'],
+                description: '''AUTO = detect from branch (dev→SNAPSHOT, main→RELEASE).
+SNAPSHOT = force snapshot build + upload to Nexus only (no deploy).
+RELEASE  = force release build + deploy to staging + production.'''
+        )
+    }
+
     environment {
         COMMIT_HASH      = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMMIT_TIME      = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
@@ -23,14 +33,12 @@ pipeline {
         stage('Branch Check') {
             steps {
                 script {
-                    // git rev-parse fails in detached HEAD (Jenkins checkout by commit hash)
-                    // Use GIT_BRANCH env var Jenkins sets, or fall back to origin ref
                     env.GIT_BRANCH_NAME = sh(
                             script: '''
-                    git name-rev --name-only HEAD \
-                    | sed 's|remotes/origin/||' \
-                    | sed 's|~.*||'
-                ''',
+                            git name-rev --name-only HEAD \
+                            | sed 's|remotes/origin/||' \
+                            | sed 's|~.*||'
+                        ''',
                             returnStdout: true
                     ).trim()
 
@@ -44,29 +52,39 @@ pipeline {
             }
         }
 
-        // ── Stage 0: Record pipeline start time ───────────────────────────
+        // ── Stage 0: Resolve build type + version ─────────────────────────
         stage('Track Start') {
             steps {
                 script {
-                    env.PIPELINE_START = sh(
-                            script: 'date -Iseconds',
-                            returnStdout: true
-                    ).trim()
+                    env.PIPELINE_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
 
-                    // Set build type and version based on branch
-                    if (env.GIT_BRANCH_NAME == 'main') {
-                        env.BUILD_TYPE   = 'RELEASE'
-                        env.NEXUS_ACTIVE = env.NEXUS_URL
+                    // Determine BUILD_TYPE: parameter overrides branch detection
+                    if (params.BUILD_MODE == 'SNAPSHOT') {
+                        env.BUILD_TYPE = 'SNAPSHOT'
+                    } else if (params.BUILD_MODE == 'RELEASE') {
+                        env.BUILD_TYPE = 'RELEASE'
                     } else {
-                        env.BUILD_TYPE   = 'SNAPSHOT'
+                        // AUTO: derive from branch
+                        env.BUILD_TYPE = (env.GIT_BRANCH_NAME == 'main') ? 'RELEASE' : 'SNAPSHOT'
+                    }
+
+                    // Set version: SNAPSHOT gets -SNAPSHOT suffix, RELEASE does not
+                    def buildNum = env.BUILD_NUMBER
+                    if (env.BUILD_TYPE == 'SNAPSHOT') {
+                        env.APP_VERSION  = "0.0.${buildNum}-SNAPSHOT"
                         env.NEXUS_ACTIVE = env.NEXUS_URL_SNAP
+                    } else {
+                        env.APP_VERSION  = "0.0.${buildNum}"
+                        env.NEXUS_ACTIVE = env.NEXUS_URL
                     }
 
                     echo """
                     ╔══════════════════════════════════════════════════════╗
                     ║  PIPELINE 1 — TRADITIONAL                           ║
                     ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
+                    ║  Mode:    ${params.BUILD_MODE}                      ║
                     ║  Type:    ${env.BUILD_TYPE}                         ║
+                    ║  Version: ${env.APP_VERSION}                        ║
                     ║  Commit:  ${COMMIT_HASH}                            ║
                     ║  Started: ${env.PIPELINE_START}                     ║
                     ╚══════════════════════════════════════════════════════╝
@@ -79,7 +97,8 @@ pipeline {
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    sh "mvn versions:set -DnewVersion=0.0.${BUILD_NUMBER} -DgenerateBackupPoms=false -B"
+                    // Set the resolved version in pom.xml before building
+                    sh "mvn versions:set -DnewVersion=${env.APP_VERSION} -DgenerateBackupPoms=false -B"
 
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
@@ -91,14 +110,6 @@ pipeline {
 
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
-
-                    dir('backend') {
-                        env.APP_VERSION = sh(
-                                script: 'mvn help:evaluate -Dexpression=project.version -q -DforceStdout -B',
-                                returnStdout: true
-                        ).trim()
-                    }
-
                     echo "Build complete. Version: ${env.APP_VERSION}"
                     echo "Build finished at: ${env.BUILD_END}"
                     sh "ls -lh backend/target/tire-testing-${env.APP_VERSION}.jar"
@@ -140,22 +151,32 @@ pipeline {
                     }
                 }
 
-                sh """
-                  HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
-                    -u jenkins:Raizanhasan4949 \
-                    "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar")
-                  echo "Nexus verification (${env.BUILD_TYPE}): HTTP \$HTTP_CODE"
-                  if [ "\$HTTP_CODE" != "200" ]; then
-                    echo "JAR not found in Nexus! Upload may have failed."
-                    exit 1
-                  fi
-                  echo "JAR verified in Nexus repository."
-                """
+                script {
+                    // Snapshots use maven-metadata.xml because JAR filename has timestamp
+                    // Releases check the JAR directly
+                    def checkUrl = (env.BUILD_TYPE == 'RELEASE')
+                            ? "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
+                            : "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
+
+                    sh """
+                      HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
+                        -u jenkins:Raizanhasan4949 "${checkUrl}")
+                      echo "Nexus verification (${env.BUILD_TYPE}): HTTP \$HTTP_CODE"
+                      if [ "\$HTTP_CODE" != "200" ]; then
+                        echo "Artifact not found in Nexus! Upload may have failed."
+                        exit 1
+                      fi
+                      echo "Artifact verified in Nexus repository."
+                    """
+                }
             }
         }
 
-        // ── Stage 4: Deploy to Staging (dev + main) ───────────────────────
+        // ── Stage 4: Deploy to Staging (RELEASE only) ─────────────────────
         stage('Deploy to Staging') {
+            when {
+                expression { env.BUILD_TYPE == 'RELEASE' }
+            }
             steps {
                 script {
                     env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
@@ -187,8 +208,11 @@ pipeline {
             }
         }
 
-        // ── Stage 5: Health Check — Staging ───────────────────────────────
+        // ── Stage 5: Health Check — Staging (RELEASE only) ────────────────
         stage('Health Check — Staging') {
+            when {
+                expression { env.BUILD_TYPE == 'RELEASE' }
+            }
             steps {
                 sh """
                   echo "Verifying staging health after deployment..."
@@ -215,17 +239,17 @@ pipeline {
                     fi
                   done
 
-                  echo "FAILED: Staging did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
+                  echo "FAILED: Staging did not become healthy"
                   curl -v http://${STAGING_IP}:8081/actuator/health 2>&1 || true
                   exit 1
                 """
             }
         }
 
-        // ── Stage 6: Deploy to Production (main only) ─────────────────────
+        // ── Stage 6: Deploy to Production (RELEASE only) ──────────────────
         stage('Deploy to Production') {
             when {
-                expression { env.GIT_BRANCH_NAME == 'main' }
+                expression { env.BUILD_TYPE == 'RELEASE' }
             }
             steps {
                 withCredentials([
@@ -235,9 +259,8 @@ pipeline {
                         )
                 ]) {
                     sh """
-                      echo "Staging passed. Promoting release ${env.APP_VERSION} to Production (VM3)..."
+                      echo "Staging passed. Promoting ${env.APP_VERSION} to Production (VM3)..."
 
-                      echo "Updating Hiera version for production (VM3) to ${env.APP_VERSION}..."
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
@@ -260,10 +283,10 @@ pipeline {
             }
         }
 
-        // ── Stage 7: Health Check — Production (main only) ────────────────
+        // ── Stage 7: Health Check — Production (RELEASE only) ─────────────
         stage('Health Check — Production') {
             when {
-                expression { env.GIT_BRANCH_NAME == 'main' }
+                expression { env.BUILD_TYPE == 'RELEASE' }
             }
             steps {
                 sh """
@@ -298,7 +321,7 @@ pipeline {
                     fi
                   done
 
-                  echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
+                  echo "FAILED: Application did not become healthy"
                   curl -v http://${PROD_IP}:8081/actuator/health 2>&1 || true
                   exit 1
                 """
@@ -313,19 +336,13 @@ pipeline {
                   chmod 777 /var/log/dora
 
                   echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},\
-${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},SUCCESS,traditional" \
+${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},${env.APP_VERSION},${env.BUILD_TYPE},SUCCESS,traditional" \
                     >> /var/log/dora/metrics.csv
 
                   echo "DORA row logged successfully:"
-                  echo "  commit_hash:    ${COMMIT_HASH}"
-                  echo "  commit_time:    ${COMMIT_TIME}"
-                  echo "  pipeline_start: ${env.PIPELINE_START}"
-                  echo "  build_end:      ${env.BUILD_END}"
-                  echo "  deploy_start:   ${env.DEPLOY_START}"
-                  echo "  deploy_end:     ${env.DEPLOY_END}"
-                  echo "  status:         SUCCESS"
-                  echo "  pipeline:       traditional"
-
+                  echo "  version:   ${env.APP_VERSION}"
+                  echo "  type:      ${env.BUILD_TYPE}"
+                  echo "  status:    SUCCESS"
                   echo "--- Full DORA log ---"
                   cat /var/log/dora/metrics.csv
                 """
@@ -339,14 +356,14 @@ ${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},SUCCESS,traditional" \
             sh """
               mkdir -p /var/log/dora
               echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},\
-${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),FAILED,traditional" \
+${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),${env.APP_VERSION ?: ''},${env.BUILD_TYPE ?: 'UNKNOWN'},FAILED,traditional" \
                 >> /var/log/dora/metrics.csv
               echo "FAILED deployment recorded in DORA log"
             """
         }
 
         success {
-            echo "Pipeline 1 (Traditional) — Deployment successful. Version: ${env.APP_VERSION}"
+            echo "Pipeline 1 (Traditional) — ${env.BUILD_TYPE} ${env.APP_VERSION} completed successfully."
         }
 
         always {
