@@ -23,8 +23,14 @@ pipeline {
         stage('Branch Check') {
             steps {
                 script {
+                    // git rev-parse fails in detached HEAD (Jenkins checkout by commit hash)
+                    // Use GIT_BRANCH env var Jenkins sets, or fall back to origin ref
                     env.GIT_BRANCH_NAME = sh(
-                            script: 'git rev-parse --abbrev-ref HEAD',
+                            script: '''
+                    git name-rev --name-only HEAD \
+                    | sed 's|remotes/origin/||' \
+                    | sed 's|~.*||'
+                ''',
                             returnStdout: true
                     ).trim()
 
