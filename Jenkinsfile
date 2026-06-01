@@ -1,7 +1,6 @@
 pipeline {
     agent any
 
-    // Use the managed Maven settings.xml that contains Nexus credentials
     options {
         timestamps()
         timeout(time: 30, unit: 'MINUTES')
@@ -9,84 +8,71 @@ pipeline {
     }
 
     environment {
-        // DORA tracking fields
-        COMMIT_HASH  = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        COMMIT_TIME  = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
-
-        // Infrastructure IPs
-        PUPPET_MASTER_IP = '192.168.56.2'
-        PROD_IP          = '192.168.56.4'
-
-        // Nexus
-        NEXUS_URL    = 'http://192.168.56.3:8081/repository/tire-testing-releases'
+        COMMIT_HASH       = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        COMMIT_TIME       = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
+        PUPPET_MASTER_IP  = '192.168.56.2'
+        STAGING_IP        = '192.168.56.5'   // VM4
+        PROD_IP           = '192.168.56.4'   // VM3
+        NEXUS_URL_RELEASE = 'http://192.168.56.3:8081/repository/tire-testing-releases'
+        NEXUS_URL_SNAP    = 'http://192.168.56.3:8081/repository/tire-testing-snapshots'
+        IS_MAIN           = "${env.BRANCH_NAME == 'main' ? 'true' : 'false'}"
     }
 
     stages {
 
-        // ── Stage 0: Record pipeline start time ───────────────────────────
         stage('Track Start') {
             steps {
                 script {
-                    env.PIPELINE_START = sh(
-                            script: 'date -Iseconds',
-                            returnStdout: true
-                    ).trim()
+                    env.PIPELINE_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
 
-                    echo """
-                    ╔══════════════════════════════════════════════════════╗
-                    ║  PIPELINE 1 — TRADITIONAL                           ║
-                    ║  Commit:  ${COMMIT_HASH}                            ║
-                    ║  Started: ${env.PIPELINE_START}                     ║
-                    ╚══════════════════════════════════════════════════════╝
-                    """
+                    // Set version based on branch
+                    if (env.BRANCH_NAME == 'main') {
+                        // Strip -SNAPSHOT for release build
+                        def rawVersion = sh(
+                                script: 'cd backend && mvn help:evaluate -Dexpression=project.version -q -DforceStdout -B',
+                                returnStdout: true
+                        ).trim()
+                        env.APP_VERSION = rawVersion.replace('-SNAPSHOT', '')
+                        env.BUILD_TYPE = 'RELEASE'
+                    } else {
+                        env.APP_VERSION = sh(
+                                script: 'cd backend && mvn help:evaluate -Dexpression=project.version -q -DforceStdout -B',
+                                returnStdout: true
+                        ).trim()
+                        env.BUILD_TYPE = 'SNAPSHOT'
+                    }
+
+                    echo "Branch: ${env.BRANCH_NAME} | Type: ${env.BUILD_TYPE} | Version: ${env.APP_VERSION}"
                 }
             }
         }
 
-        // ── Stage 1: Build JAR + React ────────────────────────────────────
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    // This single command:
-                    // 1. frontend-maven-plugin: downloads Node, runs npm install, npm run build
-                    // 2. maven-resources-plugin: copies dist/ into JAR static resources
-                    // 3. spring-boot-maven-plugin: packages the fat JAR
-                    sh "mvn versions:set -DnewVersion=0.0.${BUILD_NUMBER} -DgenerateBackupPoms=false -B"
-
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
                             mavenLocalRepo: '/var/lib/jenkins/.m2/repository'
                     ) {
+                        script {
+                            if (env.BRANCH_NAME == 'main') {
+                                // Set release version before building (removes -SNAPSHOT)
+                                sh "mvn versions:set -DnewVersion=${env.APP_VERSION} -B"
+                            }
+                        }
                         sh 'mvn clean package -DskipTests -B'
                     }
                 }
-
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
-
-                    // Get the actual version from pom.xml
-                    dir('backend') {
-                        env.APP_VERSION = sh(
-                                script: 'mvn help:evaluate -Dexpression=project.version -q -DforceStdout -B',
-                                returnStdout: true
-                        ).trim()
-                    }
-
-                    echo "Build complete. Version: ${env.APP_VERSION}"
-                    echo "Build finished at: ${env.BUILD_END}"
-
-                    // Verify the JAR was created
-                    sh "ls -lh backend/target/tire-testing-${env.APP_VERSION}.jar"
+                    echo "Build complete. Version: ${env.APP_VERSION} (${env.BUILD_TYPE})"
                 }
             }
         }
 
-        // ── Stage 2: Run Tests ────────────────────────────────────────────
         stage('Test') {
             steps {
                 dir('backend') {
-                    // Tests use H2 in-memory database (scope=test in pom.xml)
-                    // No PostgreSQL connection needed here
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
                             mavenLocalRepo: '/var/lib/jenkins/.m2/repository'
@@ -97,20 +83,14 @@ pipeline {
             }
             post {
                 always {
-                    junit(
-                            allowEmptyResults: true,
-                            testResults: 'backend/target/surefire-reports/*.xml'
-                    )
+                    junit(allowEmptyResults: true, testResults: 'backend/target/surefire-reports/*.xml')
                 }
             }
         }
 
-        // ── Stage 3: Upload JAR to Nexus ──────────────────────────────────
         stage('Upload to Nexus') {
             steps {
                 dir('backend') {
-                    // mvn deploy uses the distributionManagement in pom.xml
-                    // Authentication comes from the Maven settings.xml (global-maven-settings)
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
                             mavenLocalRepo: '/var/lib/jenkins/.m2/repository'
@@ -119,158 +99,131 @@ pipeline {
                     }
                 }
 
-                // Verify it's in Nexus
-                sh """
-                  HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
-                    -u jenkins:Raizanhasan4949 \
-                    "${NEXUS_URL}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar")
-                  echo "Nexus verification: HTTP \$HTTP_CODE"
-                  if [ "\$HTTP_CODE" != "200" ]; then
-                    echo "JAR not found in Nexus! Upload may have failed."
-                    exit 1
-                  fi
-                  echo "JAR verified in Nexus repository."
-                """
-            }
-        }
-
-        // ── Stage 4: Deploy via Puppet ─────────────────────────────────────
-        stage('Deploy via Puppet') {
-            steps {
                 script {
-                    env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
-                    echo "Starting deployment at: ${env.DEPLOY_START}"
-                }
-
-                withCredentials([
-                        sshUserPrivateKey(
-                                credentialsId: 'vm-ssh-key',
-                                keyFileVariable: 'SSH_KEY'
-                        )
-                ]) {
+                    // Verify it's in the correct Nexus repo
+                    def nexusUrl = (env.BRANCH_NAME == 'main') ? env.NEXUS_URL_RELEASE : env.NEXUS_URL_SNAP
                     sh """
-                          # ── Step 1: Update the version in Puppet Hiera ────────
-                          echo "Updating Hiera version to ${env.APP_VERSION}..."
-                          ssh -i \$SSH_KEY \
-                              -o StrictHostKeyChecking=no \
-                              -o ConnectTimeout=10 \
-                              node1@${PUPPET_MASTER_IP} \
-                              "sudo sh -c 'printf -- \\\"---\\\\napp_version: ${env.APP_VERSION}\\\\n\\\" > /etc/puppet/code/environments/production/hieradata/common.yaml && cat /etc/puppet/code/environments/production/hieradata/common.yaml && echo Hiera updated on Puppet Master'"
-                        
-                          # ── Step 2: Trigger immediate Puppet run on VM3 ───────
-                          echo "Triggering Puppet agent run on VM3..."
-                          ssh -i \$SSH_KEY \
-                              -o StrictHostKeyChecking=no \
-                              -o ConnectTimeout=10 \
-                              node3@${PROD_IP} \
-                              "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete"
-                        """
-                }
-
-                script {
-                    env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
-                    echo "Puppet deploy complete at: ${env.DEPLOY_END}"
+                      HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
+                        -u jenkins:jenkins_nexus123 \
+                        "${nexusUrl}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar")
+                      echo "Nexus verification (${env.BUILD_TYPE}): HTTP \$HTTP_CODE"
+                      if [ "\$HTTP_CODE" != "200" ]; then
+                        echo "JAR not found in Nexus!"
+                        exit 1
+                      fi
+                    """
                 }
             }
         }
 
-        // ── Stage 5: Health Check ──────────────────────────────────────────
-        stage('Health Check') {
+        // ── Always deploy to Staging ──────────────────────────────────────
+        stage('Deploy to Staging') {
+            steps {
+                script { env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim() }
+
+                withCredentials([sshUserPrivateKey(credentialsId: 'vm-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                    sh """
+                      echo "Updating Hiera for VM4 (staging) → ${env.APP_VERSION}..."
+                      ssh -i \$SSH_KEY -o StrictHostKeyChecking=no root@${PUPPET_MASTER_IP} \
+                        "echo '---\napp_version: \\'${env.APP_VERSION}\\'' \
+                        > /etc/puppetlabs/code/environments/production/hieradata/nodes/vm4.yaml"
+
+                      echo "Triggering Puppet on VM4 (staging)..."
+                      ssh -i \$SSH_KEY -o StrictHostKeyChecking=no root@${STAGING_IP} \
+                        "timeout 120 /opt/puppetlabs/bin/puppet agent --test --no-daemonize"
+                    """
+                }
+            }
+        }
+
+        stage('Health Check — Staging') {
             steps {
                 sh """
-                  echo "Verifying application health after deployment..."
-                  MAX_ATTEMPTS=3
-                  SLEEP_SECS=5
-
-                  for i in \$(seq 1 \$MAX_ATTEMPTS); do
-                    HTTP_CODE=\$(curl -s \
-                      --max-time 5 \
-                      --output /dev/null \
-                      --write-out "%{http_code}" \
-                      http://${PROD_IP}:8081/actuator/health \
-                      2>/dev/null || echo "000")
-
-                    echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
-
+                  echo "Checking staging health at ${STAGING_IP}:8080..."
+                  for i in \$(seq 1 36); do
+                    HTTP_CODE=\$(curl -s -o /dev/null --write-out "%{http_code}" \
+                      --max-time 5 http://${STAGING_IP}:8080/actuator/health 2>/dev/null || echo "000")
+                    echo "  Attempt \$i/36 → HTTP \$HTTP_CODE"
                     if [ "\$HTTP_CODE" = "200" ]; then
-                      echo "Application is healthy!"
-
-                      # Also verify React app is served correctly
-                      REACT_CODE=\$(curl -s \
-                        --max-time 5 \
-                        --output /dev/null \
-                        --write-out "%{http_code}" \
-                        http://${PROD_IP}:8080/ \
-                        2>/dev/null || echo "000")
-                      echo "  React app HTTP: \$REACT_CODE"
+                      echo "Staging is healthy!"
                       exit 0
                     fi
-
-                    if [ \$i -lt \$MAX_ATTEMPTS ]; then
-                      sleep \$SLEEP_SECS
-                    fi
+                    sleep 10
                   done
-
-                  echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
-                  # Show the actual response for debugging
-                  curl -v http://${PROD_IP}:8081/actuator/health 2>&1 || true
+                  echo "Staging health check FAILED"
                   exit 1
                 """
             }
         }
 
-        // ── Stage 6: Log DORA Metrics ──────────────────────────────────────
-        stage('Log DORA Metrics') {
+        // ── Only deploy to Production on main branch ──────────────────────
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'vm-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                    sh """
+                      echo "Staging healthy. Promoting release ${env.APP_VERSION} to production..."
+
+                      echo "Updating Hiera for VM3 (prod) → ${env.APP_VERSION}..."
+                      ssh -i \$SSH_KEY -o StrictHostKeyChecking=no root@${PUPPET_MASTER_IP} \
+                        "echo '---\napp_version: \\'${env.APP_VERSION}\\'' \
+                        > /etc/puppetlabs/code/environments/production/hieradata/nodes/vm3.yaml"
+
+                      echo "Triggering Puppet on VM3 (prod)..."
+                      ssh -i \$SSH_KEY -o StrictHostKeyChecking=no root@${PROD_IP} \
+                        "timeout 120 /opt/puppetlabs/bin/puppet agent --test --no-daemonize"
+                    """
+                }
+
+                script {
+                    env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Health Check — Production') {
+            when {
+                branch 'main'
+            }
             steps {
                 sh """
-                  mkdir -p /var/log/dora
-                  chmod 777 /var/log/dora
-
-                  # Write DORA CSV row
-                  echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},\
-${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},SUCCESS,traditional" \
-                    >> /var/log/dora/metrics.csv
-
-                  echo "DORA row logged successfully:"
-                  echo "  commit_hash:    ${COMMIT_HASH}"
-                  echo "  commit_time:    ${COMMIT_TIME}"
-                  echo "  pipeline_start: ${env.PIPELINE_START}"
-                  echo "  build_end:      ${env.BUILD_END}"
-                  echo "  deploy_start:   ${env.DEPLOY_START}"
-                  echo "  deploy_end:     ${env.DEPLOY_END}"
-                  echo "  status:         SUCCESS"
-                  echo "  pipeline:       traditional"
-
-                  # Show all logged rows
-                  echo "--- Full DORA log ---"
-                  cat /var/log/dora/metrics.csv
+                  echo "Checking production health at ${PROD_IP}:8080..."
+                  for i in \$(seq 1 36); do
+                    HTTP_CODE=\$(curl -s -o /dev/null --write-out "%{http_code}" \
+                      --max-time 5 http://${PROD_IP}:8080/actuator/health 2>/dev/null || echo "000")
+                    echo "  Attempt \$i/36 → HTTP \$HTTP_CODE"
+                    if [ "\$HTTP_CODE" = "200" ]; then
+                      echo "Production is healthy!"
+                      exit 0
+                    fi
+                    sleep 10
+                  done
+                  echo "Production health check FAILED"
+                  exit 1
                 """
             }
         }
 
+        stage('Log DORA Metrics') {
+            steps {
+                sh """
+                  mkdir -p /var/log/dora
+                  echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END ?: env.DEPLOY_START},${env.BUILD_TYPE},SUCCESS,traditional" \
+                    >> /var/log/dora/metrics.csv
+                """
+            }
+        }
     }
 
     post {
         failure {
             sh """
               mkdir -p /var/log/dora
-              echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},\
-${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),FAILED,traditional" \
+              echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),${env.BUILD_TYPE ?: 'UNKNOWN'},FAILED,traditional" \
                 >> /var/log/dora/metrics.csv
-              echo "FAILED deployment recorded in DORA log"
             """
-        }
-
-        success {
-            echo "Pipeline 1 (Traditional) — Deployment successful. Version: ${env.APP_VERSION}"
-        }
-
-        always {
-            // Archive test results
-            archiveArtifacts(
-                    artifacts: 'backend/target/surefire-reports/**',
-                    allowEmptyArchive: true
-            )
         }
     }
 }
