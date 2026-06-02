@@ -11,7 +11,7 @@ pipeline {
         choice(
                 name: 'BUILD_MODE',
                 choices: ['AUTO', 'SNAPSHOT', 'RELEASE'],
-                description: 'AUTO = detect from branch. SNAPSHOT = force snapshot build. RELEASE = force release build + deploy.'
+                description: 'AUTO = detect from branch (dev→SNAPSHOT/staging, main→RELEASE/production). SNAPSHOT = force snapshot. RELEASE = force release.'
         )
     }
 
@@ -61,11 +61,20 @@ pipeline {
                             returnStdout: true
                     ).trim()
 
-                    // Parameter overrides branch detection
+                    // For webhook pushes BUILD_MODE will be 'AUTO' (first choice = default)
+                    // For manual builds user picks SNAPSHOT or RELEASE
                     def forcedMode = params.BUILD_MODE ?: 'AUTO'
 
-                    def isRelease = (forcedMode == 'RELEASE') ||
-                            (forcedMode == 'AUTO' && env.GIT_BRANCH_NAME == 'main')
+                    def isRelease
+
+                    if (forcedMode == 'RELEASE') {
+                        isRelease = true
+                    } else if (forcedMode == 'SNAPSHOT') {
+                        isRelease = false
+                    } else {
+                        // AUTO — use branch name
+                        isRelease = (env.GIT_BRANCH_NAME == 'main')
+                    }
 
                     if (isRelease) {
                         env.BUILD_TYPE    = 'RELEASE'
