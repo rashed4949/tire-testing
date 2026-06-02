@@ -220,8 +220,8 @@ pipeline {
           sleep 20
 
           echo "Verifying health at ${env.DEPLOY_TARGET}:8080..."
-          MAX_ATTEMPTS=3
-          SLEEP_SECS=5
+          MAX_ATTEMPTS=6
+          SLEEP_SECS=10
 
           for i in \$(seq 1 \$MAX_ATTEMPTS); do
             HTTP_CODE=\$(curl -s --max-time 5 --output /dev/null --write-out "%{http_code}" \
