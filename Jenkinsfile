@@ -217,8 +217,8 @@ pipeline {
             steps {
                 sh """
                   echo "Verifying health at ${env.DEPLOY_TARGET}:8081..."
-                  MAX_ATTEMPTS=36
-                  SLEEP_SECS=10
+                  MAX_ATTEMPTS=3
+                  SLEEP_SECS=3
 
                   for i in \$(seq 1 \$MAX_ATTEMPTS); do
                     HTTP_CODE=\$(curl -s \
