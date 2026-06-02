@@ -64,7 +64,7 @@ pipeline {
                     } else {
                         env.BUILD_TYPE    = 'SNAPSHOT'
                         env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}-SNAPSHOT"
-                        env.NEXUS_ACTIVE  = env.NEXUS_URL_SNAP
+                        env.NEXUS_ACTIVE  = env.NEXUS_URL        // releases repo — predictable filenames
                         env.DEPLOY_TARGET = env.STAGING_IP
                         env.HIERA_NODE    = 'vm4'
                         env.SSH_USER      = 'node3'
