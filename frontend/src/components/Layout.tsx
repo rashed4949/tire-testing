@@ -42,7 +42,7 @@ export default function Layout() {
         {/* Logo */}
         <Box sx={{ p: 3, pb: 2 }}>
           <Typography variant="h6" sx={{ color: '#FFD100', fontWeight: 800, letterSpacing: 1 }}>
-            🔧 TireTest Prod
+            🔧 TireTest dev
           </Typography>
           <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
            ABC Tire Company
