@@ -219,13 +219,13 @@ pipeline {
           echo "Waiting for app to initialize..."
           sleep 20
 
-          echo "Verifying health at ${env.DEPLOY_TARGET}:8080..."
-          MAX_ATTEMPTS=6
-          SLEEP_SECS=10
+          echo "Verifying health at ${env.DEPLOY_TARGET}:8081..."
+          MAX_ATTEMPTS=3
+          SLEEP_SECS=5
 
           for i in \$(seq 1 \$MAX_ATTEMPTS); do
             HTTP_CODE=\$(curl -s --max-time 5 --output /dev/null --write-out "%{http_code}" \
-              http://${env.DEPLOY_TARGET}:8080/actuator/health 2>/dev/null)
+              http://${env.DEPLOY_TARGET}:8081/actuator/health 2>/dev/null)
             if [ -z "\$HTTP_CODE" ]; then
               HTTP_CODE="000"
             fi
