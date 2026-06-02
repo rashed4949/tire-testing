@@ -216,9 +216,12 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh """
+          echo "Waiting for app to initialize..."
+          sleep 20
+
           echo "Verifying health at ${env.DEPLOY_TARGET}:8080..."
-          MAX_ATTEMPTS=6
-          SLEEP_SECS=10
+          MAX_ATTEMPTS=3
+          SLEEP_SECS=5
 
           for i in \$(seq 1 \$MAX_ATTEMPTS); do
             HTTP_CODE=\$(curl -s --max-time 5 --output /dev/null --write-out "%{http_code}" \
@@ -239,12 +242,11 @@ pipeline {
             fi
           done
 
-          echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
+          echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS + 20 ))s"
           exit 1
         """
             }
         }
-
         // ── Stage 6: Log DORA Metrics ──────────────────────────────────────
         stage('Log DORA Metrics') {
             steps {
