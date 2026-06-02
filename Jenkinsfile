@@ -216,41 +216,41 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh """
-                  echo "Verifying health at ${env.DEPLOY_TARGET}:8081..."
-                  MAX_ATTEMPTS=3
-                  SLEEP_SECS=3
+          echo "Verifying health at ${env.DEPLOY_TARGET}:8080..."
+          MAX_ATTEMPTS=3
+          SLEEP_SECS=5
 
-                  for i in \$(seq 1 \$MAX_ATTEMPTS); do
-                    HTTP_CODE=\$(curl -s \
-                      --max-time 5 \
-                      --output /dev/null \
-                      --write-out "%{http_code}" \
-                      http://${env.DEPLOY_TARGET}:8081/actuator/health \
-                      2>/dev/null || echo "000")
+          for i in \$(seq 1 \$MAX_ATTEMPTS); do
+            HTTP_CODE=\$(curl -s \
+              --max-time 5 \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              http://${env.DEPLOY_TARGET}:8080/actuator/health \
+              2>/dev/null || echo "000")
 
-                    echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
+            echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
 
-                    if [ "\$HTTP_CODE" = "200" ]; then
-                      echo "Application is healthy on ${env.DEPLOY_TARGET}!"
-                      REACT_CODE=\$(curl -s \
-                        --max-time 5 \
-                        --output /dev/null \
-                        --write-out "%{http_code}" \
-                        http://${env.DEPLOY_TARGET}:8080/ \
-                        2>/dev/null || echo "000")
-                      echo "  React app HTTP: \$REACT_CODE"
-                      exit 0
-                    fi
+            if [ "\$HTTP_CODE" = "200" ]; then
+              echo "Application is healthy on ${env.DEPLOY_TARGET}!"
+              REACT_CODE=\$(curl -s \
+                --max-time 5 \
+                --output /dev/null \
+                --write-out "%{http_code}" \
+                http://${env.DEPLOY_TARGET}:8080/ \
+                2>/dev/null || echo "000")
+              echo "  React app HTTP: \$REACT_CODE"
+              exit 0
+            fi
 
-                    if [ \$i -lt \$MAX_ATTEMPTS ]; then
-                      sleep \$SLEEP_SECS
-                    fi
-                  done
+            if [ \$i -lt \$MAX_ATTEMPTS ]; then
+              sleep \$SLEEP_SECS
+            fi
+          done
 
-                  echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
-                  curl -v http://${env.DEPLOY_TARGET}:8081/actuator/health 2>&1 || true
-                  exit 1
-                """
+          echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
+          curl -v http://${env.DEPLOY_TARGET}:8080/actuator/health 2>&1 || true
+          exit 1
+        """
             }
         }
 
