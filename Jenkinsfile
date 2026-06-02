@@ -7,16 +7,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
-    parameters {
-        choice(
-                name: 'BUILD_MODE',
-                choices: ['AUTO', 'SNAPSHOT', 'RELEASE'],
-                description: '''AUTO = detect from branch (dev→SNAPSHOT, main→RELEASE).
-SNAPSHOT = force snapshot build + upload to Nexus only (no deploy).
-RELEASE  = force release build + deploy to staging + production.'''
-        )
-    }
-
     environment {
         COMMIT_HASH      = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMMIT_TIME      = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
@@ -52,39 +42,41 @@ RELEASE  = force release build + deploy to staging + production.'''
             }
         }
 
-        // ── Stage 0: Resolve build type + version ─────────────────────────
+        // ── Stage 0: Resolve build type + date-based version ─────────────
         stage('Track Start') {
             steps {
                 script {
                     env.PIPELINE_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
 
-                    // Determine BUILD_TYPE: parameter overrides branch detection
-                    if (params.BUILD_MODE == 'SNAPSHOT') {
-                        env.BUILD_TYPE = 'SNAPSHOT'
-                    } else if (params.BUILD_MODE == 'RELEASE') {
-                        env.BUILD_TYPE = 'RELEASE'
-                    } else {
-                        // AUTO: derive from branch
-                        env.BUILD_TYPE = (env.GIT_BRANCH_NAME == 'main') ? 'RELEASE' : 'SNAPSHOT'
-                    }
+                    // Date-based version: DD.MM.YY
+                    def dateVersion = sh(
+                            script: 'date +%d.%m.%y',
+                            returnStdout: true
+                    ).trim()
 
-                    // Set version: SNAPSHOT gets -SNAPSHOT suffix, RELEASE does not
-                    def buildNum = env.BUILD_NUMBER
-                    if (env.BUILD_TYPE == 'SNAPSHOT') {
-                        env.APP_VERSION  = "0.0.${buildNum}-SNAPSHOT"
-                        env.NEXUS_ACTIVE = env.NEXUS_URL_SNAP
-                    } else {
-                        env.APP_VERSION  = "0.0.${buildNum}"
+                    if (env.GIT_BRANCH_NAME == 'main') {
+                        env.BUILD_TYPE   = 'RELEASE'
+                        env.APP_VERSION  = dateVersion
                         env.NEXUS_ACTIVE = env.NEXUS_URL
+                        env.DEPLOY_TARGET = env.PROD_IP
+                        env.HIERA_NODE   = 'vm3'
+                        env.SSH_USER     = 'node3'
+                    } else {
+                        env.BUILD_TYPE   = 'SNAPSHOT'
+                        env.APP_VERSION  = "${dateVersion}-SNAPSHOT"
+                        env.NEXUS_ACTIVE = env.NEXUS_URL_SNAP
+                        env.DEPLOY_TARGET = env.STAGING_IP
+                        env.HIERA_NODE   = 'vm4'
+                        env.SSH_USER     = 'node3'
                     }
 
                     echo """
                     ╔══════════════════════════════════════════════════════╗
                     ║  PIPELINE 1 — TRADITIONAL                           ║
                     ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
-                    ║  Mode:    ${params.BUILD_MODE}                      ║
                     ║  Type:    ${env.BUILD_TYPE}                         ║
                     ║  Version: ${env.APP_VERSION}                        ║
+                    ║  Target:  ${env.DEPLOY_TARGET}                      ║
                     ║  Commit:  ${COMMIT_HASH}                            ║
                     ║  Started: ${env.PIPELINE_START}                     ║
                     ╚══════════════════════════════════════════════════════╝
@@ -97,7 +89,6 @@ RELEASE  = force release build + deploy to staging + production.'''
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    // Set the resolved version in pom.xml before building
                     sh "mvn versions:set -DnewVersion=${env.APP_VERSION} -DgenerateBackupPoms=false -B"
 
                     withMaven(
@@ -152,8 +143,8 @@ RELEASE  = force release build + deploy to staging + production.'''
                 }
 
                 script {
-                    // Snapshots use maven-metadata.xml because JAR filename has timestamp
-                    // Releases check the JAR directly
+                    // Releases: check JAR directly
+                    // Snapshots: check maven-metadata.xml (timestamped JAR names vary)
                     def checkUrl = (env.BUILD_TYPE == 'RELEASE')
                             ? "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
                             : "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
@@ -166,21 +157,20 @@ RELEASE  = force release build + deploy to staging + production.'''
                         echo "Artifact not found in Nexus! Upload may have failed."
                         exit 1
                       fi
-                      echo "Artifact verified in Nexus repository."
+                      echo "Artifact verified in Nexus — ${env.NEXUS_ACTIVE}"
                     """
                 }
             }
         }
 
-        // ── Stage 4: Deploy to Staging (RELEASE only) ─────────────────────
-        stage('Deploy to Staging') {
-            when {
-                expression { env.BUILD_TYPE == 'RELEASE' }
-            }
+        // ── Stage 4: Deploy ───────────────────────────────────────────────
+        // dev  → staging (192.168.56.5)
+        // main → production (192.168.56.4)
+        stage('Deploy') {
             steps {
                 script {
                     env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
-                    echo "Starting staging deployment at: ${env.DEPLOY_START}"
+                    echo "Deploying ${env.BUILD_TYPE} ${env.APP_VERSION} to ${env.DEPLOY_TARGET}..."
                 }
 
                 withCredentials([
@@ -190,127 +180,57 @@ RELEASE  = force release build + deploy to staging + production.'''
                         )
                 ]) {
                     sh """
-                      echo "Updating Hiera version for staging (VM4) to ${env.APP_VERSION}..."
+                      echo "--- Updating Hiera for ${env.HIERA_NODE} → ${env.APP_VERSION} ---"
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
                           node1@${PUPPET_MASTER_IP} \
-                          "sudo sh -c 'printf -- \\\"---\\\\napp_version: ${env.APP_VERSION}\\\\n\\\" > /etc/puppet/code/environments/production/hieradata/nodes/vm4.yaml && cat /etc/puppet/code/environments/production/hieradata/nodes/vm4.yaml && echo Hiera updated for staging'"
+                          "sudo sh -c 'printf -- \\\"---\\\\napp_version: ${env.APP_VERSION}\\\\n\\\" \
+                          > /etc/puppetlabs/code/environments/production/hieradata/nodes/${env.HIERA_NODE}.yaml \
+                          && cat /etc/puppetlabs/code/environments/production/hieradata/nodes/${env.HIERA_NODE}.yaml \
+                          && echo Hiera updated'"
 
-                      echo "Triggering Puppet agent on VM4 (staging)..."
+                      echo "--- Triggering Puppet on ${env.DEPLOY_TARGET} ---"
                       ssh -i \$SSH_KEY \
                           -o StrictHostKeyChecking=no \
                           -o ConnectTimeout=10 \
-                          node3@${STAGING_IP} \
-                          "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete on staging"
-                    """
-                }
-            }
-        }
-
-        // ── Stage 5: Health Check — Staging (RELEASE only) ────────────────
-        stage('Health Check — Staging') {
-            when {
-                expression { env.BUILD_TYPE == 'RELEASE' }
-            }
-            steps {
-                sh """
-                  echo "Verifying staging health after deployment..."
-                  MAX_ATTEMPTS=3
-                  SLEEP_SECS=5
-
-                  for i in \$(seq 1 \$MAX_ATTEMPTS); do
-                    HTTP_CODE=\$(curl -s \
-                      --max-time 5 \
-                      --output /dev/null \
-                      --write-out "%{http_code}" \
-                      http://${STAGING_IP}:8081/actuator/health \
-                      2>/dev/null || echo "000")
-
-                    echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
-
-                    if [ "\$HTTP_CODE" = "200" ]; then
-                      echo "Staging is healthy!"
-                      exit 0
-                    fi
-
-                    if [ \$i -lt \$MAX_ATTEMPTS ]; then
-                      sleep \$SLEEP_SECS
-                    fi
-                  done
-
-                  echo "FAILED: Staging did not become healthy"
-                  curl -v http://${STAGING_IP}:8081/actuator/health 2>&1 || true
-                  exit 1
-                """
-            }
-        }
-
-        // ── Stage 6: Deploy to Production (RELEASE only) ──────────────────
-        stage('Deploy to Production') {
-            when {
-                expression { env.BUILD_TYPE == 'RELEASE' }
-            }
-            steps {
-                withCredentials([
-                        sshUserPrivateKey(
-                                credentialsId: 'vm-ssh-key',
-                                keyFileVariable: 'SSH_KEY'
-                        )
-                ]) {
-                    sh """
-                      echo "Staging passed. Promoting ${env.APP_VERSION} to Production (VM3)..."
-
-                      ssh -i \$SSH_KEY \
-                          -o StrictHostKeyChecking=no \
-                          -o ConnectTimeout=10 \
-                          node1@${PUPPET_MASTER_IP} \
-                          "sudo sh -c 'printf -- \\\"---\\\\napp_version: ${env.APP_VERSION}\\\\n\\\" > /etc/puppet/code/environments/production/hieradata/nodes/vm3.yaml && cat /etc/puppet/code/environments/production/hieradata/nodes/vm3.yaml && echo Hiera updated for production'"
-
-                      echo "Triggering Puppet agent on VM3 (production)..."
-                      ssh -i \$SSH_KEY \
-                          -o StrictHostKeyChecking=no \
-                          -o ConnectTimeout=10 \
-                          node3@${PROD_IP} \
-                          "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete on production"
+                          ${env.SSH_USER}@${env.DEPLOY_TARGET} \
+                          "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete"
                     """
                 }
 
                 script {
                     env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
-                    echo "Production deploy complete at: ${env.DEPLOY_END}"
+                    echo "Deploy complete at: ${env.DEPLOY_END}"
                 }
             }
         }
 
-        // ── Stage 7: Health Check — Production (RELEASE only) ─────────────
-        stage('Health Check — Production') {
-            when {
-                expression { env.BUILD_TYPE == 'RELEASE' }
-            }
+        // ── Stage 5: Health Check ──────────────────────────────────────────
+        stage('Health Check') {
             steps {
                 sh """
-                  echo "Verifying production health after deployment..."
-                  MAX_ATTEMPTS=3
-                  SLEEP_SECS=5
+                  echo "Verifying health at ${env.DEPLOY_TARGET}:8081..."
+                  MAX_ATTEMPTS=36
+                  SLEEP_SECS=10
 
                   for i in \$(seq 1 \$MAX_ATTEMPTS); do
                     HTTP_CODE=\$(curl -s \
                       --max-time 5 \
                       --output /dev/null \
                       --write-out "%{http_code}" \
-                      http://${PROD_IP}:8081/actuator/health \
+                      http://${env.DEPLOY_TARGET}:8081/actuator/health \
                       2>/dev/null || echo "000")
 
                     echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
 
                     if [ "\$HTTP_CODE" = "200" ]; then
-                      echo "Application is healthy!"
+                      echo "Application is healthy on ${env.DEPLOY_TARGET}!"
                       REACT_CODE=\$(curl -s \
                         --max-time 5 \
                         --output /dev/null \
                         --write-out "%{http_code}" \
-                        http://${PROD_IP}:8080/ \
+                        http://${env.DEPLOY_TARGET}:8080/ \
                         2>/dev/null || echo "000")
                       echo "  React app HTTP: \$REACT_CODE"
                       exit 0
@@ -321,14 +241,14 @@ RELEASE  = force release build + deploy to staging + production.'''
                     fi
                   done
 
-                  echo "FAILED: Application did not become healthy"
-                  curl -v http://${PROD_IP}:8081/actuator/health 2>&1 || true
+                  echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS ))s"
+                  curl -v http://${env.DEPLOY_TARGET}:8081/actuator/health 2>&1 || true
                   exit 1
                 """
             }
         }
 
-        // ── Stage 8: Log DORA Metrics ──────────────────────────────────────
+        // ── Stage 6: Log DORA Metrics ──────────────────────────────────────
         stage('Log DORA Metrics') {
             steps {
                 sh """
@@ -342,6 +262,7 @@ ${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},${env.APP_VERSION},${env.
                   echo "DORA row logged successfully:"
                   echo "  version:   ${env.APP_VERSION}"
                   echo "  type:      ${env.BUILD_TYPE}"
+                  echo "  target:    ${env.DEPLOY_TARGET}"
                   echo "  status:    SUCCESS"
                   echo "--- Full DORA log ---"
                   cat /var/log/dora/metrics.csv
@@ -363,7 +284,7 @@ ${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),${env.APP_VE
         }
 
         success {
-            echo "Pipeline 1 (Traditional) — ${env.BUILD_TYPE} ${env.APP_VERSION} completed successfully."
+            echo "Pipeline 1 (Traditional) — ${env.BUILD_TYPE} ${env.APP_VERSION} deployed to ${env.DEPLOY_TARGET}."
         }
 
         always {
