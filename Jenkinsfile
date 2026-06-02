@@ -7,6 +7,14 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
+    parameters {
+        choice(
+                name: 'BUILD_MODE',
+                choices: ['AUTO', 'SNAPSHOT', 'RELEASE'],
+                description: 'AUTO = detect from branch. SNAPSHOT = force snapshot build. RELEASE = force release build + deploy.'
+        )
+    }
+
     environment {
         COMMIT_HASH      = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMMIT_TIME      = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
@@ -53,7 +61,13 @@ pipeline {
                             returnStdout: true
                     ).trim()
 
-                    if (env.GIT_BRANCH_NAME == 'main') {
+                    // Parameter overrides branch detection
+                    def forcedMode = params.BUILD_MODE ?: 'AUTO'
+
+                    def isRelease = (forcedMode == 'RELEASE') ||
+                            (forcedMode == 'AUTO' && env.GIT_BRANCH_NAME == 'main')
+
+                    if (isRelease) {
                         env.BUILD_TYPE    = 'RELEASE'
                         env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}"
                         env.DEPLOY_TARGET = env.PROD_IP
@@ -68,16 +82,17 @@ pipeline {
                     }
 
                     echo """
-                    ╔══════════════════════════════════════════════════════╗
-                    ║  PIPELINE 1 — TRADITIONAL                           ║
-                    ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
-                    ║  Type:    ${env.BUILD_TYPE}                         ║
-                    ║  Version: ${env.APP_VERSION}                        ║
-                    ║  Target:  ${env.DEPLOY_TARGET}                      ║
-                    ║  Commit:  ${COMMIT_HASH}                            ║
-                    ║  Started: ${env.PIPELINE_START}                     ║
-                    ╚══════════════════════════════════════════════════════╝
-                    """
+            ╔══════════════════════════════════════════════════════╗
+            ║  PIPELINE 1 — TRADITIONAL                           ║
+            ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
+            ║  Mode:    ${forcedMode}                             ║
+            ║  Type:    ${env.BUILD_TYPE}                         ║
+            ║  Version: ${env.APP_VERSION}                        ║
+            ║  Target:  ${env.DEPLOY_TARGET}                      ║
+            ║  Commit:  ${COMMIT_HASH}                            ║
+            ║  Started: ${env.PIPELINE_START}                     ║
+            ╚══════════════════════════════════════════════════════╝
+            """
                 }
             }
         }
