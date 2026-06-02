@@ -143,22 +143,26 @@ pipeline {
                 }
 
                 script {
-                    // Releases: check JAR directly
-                    // Snapshots: check maven-metadata.xml (timestamped JAR names vary)
                     def checkUrl = (env.BUILD_TYPE == 'RELEASE')
                             ? "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
                             : "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
 
-                    sh """
-                      HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
-                        -u jenkins:Raizanhasan4949 "${checkUrl}")
-                      echo "Nexus verification (${env.BUILD_TYPE}): HTTP \$HTTP_CODE"
-                      if [ "\$HTTP_CODE" != "200" ]; then
-                        echo "Artifact not found in Nexus! Upload may have failed."
-                        exit 1
-                      fi
-                      echo "Artifact verified in Nexus — ${env.NEXUS_ACTIVE}"
-                    """
+                    def status = sh(
+                            script: """
+            curl -s -o /dev/null -w "%{http_code}" \
+              -u jenkins:Raizanhasan4949 \
+              "${checkUrl}"
+        """,
+                            returnStdout: true
+                    ).trim()
+
+                    echo "Nexus verification (${env.BUILD_TYPE}): HTTP ${status}"
+                    echo "Checked URL: ${checkUrl}"
+
+                    if (status != '200') {
+                        error("Artifact not found in Nexus (HTTP ${status}). URL: ${checkUrl}")
+                    }
+                    echo "Artifact verified in Nexus."
                 }
             }
         }
