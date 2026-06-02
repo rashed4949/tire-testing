@@ -50,24 +50,24 @@ pipeline {
 
                     // Date-based version: DD.MM.YY
                     def dateVersion = sh(
-                            script: 'date +%d.%m.%y',
+                            script: 'date +%Y.%m.%d',
                             returnStdout: true
                     ).trim()
 
                     if (env.GIT_BRANCH_NAME == 'main') {
-                        env.BUILD_TYPE   = 'RELEASE'
-                        env.APP_VERSION  = dateVersion
-                        env.NEXUS_ACTIVE = env.NEXUS_URL
+                        env.BUILD_TYPE    = 'RELEASE'
+                        env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}"
+                        env.NEXUS_ACTIVE  = env.NEXUS_URL
                         env.DEPLOY_TARGET = env.PROD_IP
-                        env.HIERA_NODE   = 'vm3'
-                        env.SSH_USER     = 'node3'
+                        env.HIERA_NODE    = 'vm3'
+                        env.SSH_USER      = 'node3'
                     } else {
-                        env.BUILD_TYPE   = 'SNAPSHOT'
-                        env.APP_VERSION  = "${dateVersion}-SNAPSHOT"
-                        env.NEXUS_ACTIVE = env.NEXUS_URL_SNAP
+                        env.BUILD_TYPE    = 'SNAPSHOT'
+                        env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}-SNAPSHOT"
+                        env.NEXUS_ACTIVE  = env.NEXUS_URL_SNAP
                         env.DEPLOY_TARGET = env.STAGING_IP
-                        env.HIERA_NODE   = 'vm4'
-                        env.SSH_USER     = 'node3'
+                        env.HIERA_NODE    = 'vm4'
+                        env.SSH_USER      = 'node3'
                     }
 
                     echo """
