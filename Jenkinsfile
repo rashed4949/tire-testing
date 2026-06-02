@@ -10,8 +10,8 @@ pipeline {
     parameters {
         choice(
                 name: 'BUILD_MODE',
-                choices: ['AUTO', 'SNAPSHOT', 'RELEASE'],
-                description: 'AUTO = detect from branch (dev→SNAPSHOT/staging, main→RELEASE/production). SNAPSHOT = force snapshot. RELEASE = force release.'
+                choices: ['SNAPSHOT', 'RELEASE'],
+                description: 'SNAPSHOT = build + deploy to staging. RELEASE = build + deploy to production.'
         )
     }
 
@@ -61,19 +61,17 @@ pipeline {
                             returnStdout: true
                     ).trim()
 
-                    // For webhook pushes BUILD_MODE will be 'AUTO' (first choice = default)
-                    // For manual builds user picks SNAPSHOT or RELEASE
-                    def forcedMode = params.BUILD_MODE ?: 'AUTO'
-
                     def isRelease
 
-                    if (forcedMode == 'RELEASE') {
+                    if (env.GIT_BRANCH_NAME == 'main') {
+                        // main branch always goes to production regardless of parameter
                         isRelease = true
-                    } else if (forcedMode == 'SNAPSHOT') {
+                    } else if (env.GIT_BRANCH_NAME == 'dev') {
+                        // dev branch always goes to staging regardless of parameter
                         isRelease = false
                     } else {
-                        // AUTO — use branch name
-                        isRelease = (env.GIT_BRANCH_NAME == 'main')
+                        // Manual build — respect the parameter
+                        isRelease = (params.BUILD_MODE == 'RELEASE')
                     }
 
                     if (isRelease) {
@@ -94,7 +92,7 @@ pipeline {
             ╔══════════════════════════════════════════════════════╗
             ║  PIPELINE 1 — TRADITIONAL                           ║
             ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
-            ║  Mode:    ${forcedMode}                             ║
+            ║  Mode:    ${params.BUILD_MODE}                      ║
             ║  Type:    ${env.BUILD_TYPE}                         ║
             ║  Version: ${env.APP_VERSION}                        ║
             ║  Target:  ${env.DEPLOY_TARGET}                      ║
