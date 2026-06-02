@@ -13,8 +13,8 @@ pipeline {
         PUPPET_MASTER_IP = '192.168.56.2'
         PROD_IP          = '192.168.56.4'
         STAGING_IP       = '192.168.56.5'
-        NEXUS_URL        = 'http://192.168.56.3:8081/repository/tire-testing-releases'
-        NEXUS_URL_SNAP   = 'http://192.168.56.3:8081/repository/tire-testing-snapshots'
+        NEXUS_RELEASES   = 'http://192.168.56.3:8081/repository/tire-testing-releases'
+        NEXUS_SNAPSHOTS  = 'http://192.168.56.3:8081/repository/tire-testing-snapshots'
     }
 
     stages {
@@ -42,13 +42,12 @@ pipeline {
             }
         }
 
-        // ── Stage 0: Resolve build type + date-based version ─────────────
+        // ── Stage 0: Resolve build type + version ─────────────────────────
         stage('Track Start') {
             steps {
                 script {
                     env.PIPELINE_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
 
-                    // Date-based version: DD.MM.YY
                     def dateVersion = sh(
                             script: 'date +%Y.%m.%d',
                             returnStdout: true
@@ -57,14 +56,12 @@ pipeline {
                     if (env.GIT_BRANCH_NAME == 'main') {
                         env.BUILD_TYPE    = 'RELEASE'
                         env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}"
-                        env.NEXUS_ACTIVE  = env.NEXUS_URL
                         env.DEPLOY_TARGET = env.PROD_IP
                         env.HIERA_NODE    = 'vm3'
                         env.SSH_USER      = 'node3'
                     } else {
                         env.BUILD_TYPE    = 'SNAPSHOT'
                         env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}-SNAPSHOT"
-                        env.NEXUS_ACTIVE  = env.NEXUS_URL        // releases repo — predictable filenames
                         env.DEPLOY_TARGET = env.STAGING_IP
                         env.HIERA_NODE    = 'vm4'
                         env.SSH_USER      = 'node3'
@@ -143,16 +140,21 @@ pipeline {
                 }
 
                 script {
+                    // Build URL directly from BUILD_TYPE — no env variable indirection
+                    def nexusBase = (env.BUILD_TYPE == 'RELEASE')
+                            ? 'http://192.168.56.3:8081/repository/tire-testing-releases'
+                            : 'http://192.168.56.3:8081/repository/tire-testing-snapshots'
+
                     def checkUrl = (env.BUILD_TYPE == 'RELEASE')
-                            ? "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
-                            : "${env.NEXUS_ACTIVE}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
+                            ? "${nexusBase}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
+                            : "${nexusBase}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
 
                     def status = sh(
                             script: """
-            curl -s -o /dev/null -w "%{http_code}" \
-              -u jenkins:Raizanhasan4949 \
-              "${checkUrl}"
-        """,
+                            curl -s -o /dev/null -w "%{http_code}" \
+                              -u jenkins:Raizanhasan4949 \
+                              "${checkUrl}"
+                        """,
                             returnStdout: true
                     ).trim()
 
@@ -168,8 +170,8 @@ pipeline {
         }
 
         // ── Stage 4: Deploy ───────────────────────────────────────────────
-        // dev  → staging (192.168.56.5)
-        // main → production (192.168.56.4)
+        // dev  → staging  (192.168.56.5) vm4
+        // main → production (192.168.56.4) vm3
         stage('Deploy') {
             steps {
                 script {
