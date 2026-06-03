@@ -1,12 +1,10 @@
 pipeline {
     agent any
-
     options {
         timestamps()
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
-
     parameters {
         choice(
                 name: 'BUILD_MODE',
@@ -14,7 +12,6 @@ pipeline {
                 description: 'SNAPSHOT = build + deploy to staging. RELEASE = build + deploy to production.'
         )
     }
-
     environment {
         COMMIT_HASH      = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMMIT_TIME      = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
@@ -26,8 +23,6 @@ pipeline {
     }
 
     stages {
-
-        // ── Guard: only run on dev or main ────────────────────────────────
         stage('Branch Check') {
             steps {
                 script {
@@ -39,9 +34,7 @@ pipeline {
                         ''',
                             returnStdout: true
                     ).trim()
-
                     echo "Triggered on branch: ${env.GIT_BRANCH_NAME}"
-
                     if (env.GIT_BRANCH_NAME != 'main' && env.GIT_BRANCH_NAME != 'dev') {
                         currentBuild.result = 'NOT_BUILT'
                         error("Branch '${env.GIT_BRANCH_NAME}' is not dev or main — skipping pipeline.")
@@ -49,8 +42,6 @@ pipeline {
                 }
             }
         }
-
-        // ── Stage 0: Resolve build type + version ─────────────────────────
         stage('Track Start') {
             steps {
                 script {
@@ -60,20 +51,14 @@ pipeline {
                             script: 'date +%Y.%m.%d',
                             returnStdout: true
                     ).trim()
-
                     def isRelease
-
                     if (env.GIT_BRANCH_NAME == 'main') {
-                        // main branch always goes to production regardless of parameter
                         isRelease = true
                     } else if (env.GIT_BRANCH_NAME == 'dev') {
-                        // dev branch always goes to staging regardless of parameter
                         isRelease = false
                     } else {
-                        // Manual build — respect the parameter
                         isRelease = (params.BUILD_MODE == 'RELEASE')
                     }
-
                     if (isRelease) {
                         env.BUILD_TYPE    = 'RELEASE'
                         env.APP_VERSION   = "${dateVersion}-${env.BUILD_NUMBER}"
@@ -87,29 +72,23 @@ pipeline {
                         env.HIERA_NODE    = 'vm4'
                         env.SSH_USER      = 'node3'
                     }
-
                     echo """
-            ╔══════════════════════════════════════════════════════╗
-            ║  PIPELINE 1 — TRADITIONAL                           ║
-            ║  Branch:  ${env.GIT_BRANCH_NAME}                   ║
-            ║  Mode:    ${params.BUILD_MODE}                      ║
-            ║  Type:    ${env.BUILD_TYPE}                         ║
-            ║  Version: ${env.APP_VERSION}                        ║
-            ║  Target:  ${env.DEPLOY_TARGET}                      ║
-            ║  Commit:  ${COMMIT_HASH}                            ║
-            ║  Started: ${env.PIPELINE_START}                     ║
-            ╚══════════════════════════════════════════════════════╝
+              PIPELINE 1 — TRADITIONAL                           
+              Branch:  ${env.GIT_BRANCH_NAME}                   
+              Mode:    ${params.BUILD_MODE}                      
+              Type:    ${env.BUILD_TYPE}                         
+              Version: ${env.APP_VERSION}                        
+              Target:  ${env.DEPLOY_TARGET}                      
+              Commit:  ${COMMIT_HASH}                            
+              Started: ${env.PIPELINE_START}                     
             """
                 }
             }
         }
-
-        // ── Stage 1: Build JAR + React ────────────────────────────────────
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
                     sh "mvn versions:set -DnewVersion=${env.APP_VERSION} -DgenerateBackupPoms=false -B"
-
                     withMaven(
                             globalMavenSettingsConfig: 'global-maven-settings',
                             mavenLocalRepo: '/var/lib/jenkins/.m2/repository'
@@ -117,7 +96,6 @@ pipeline {
                         sh 'mvn clean package -DskipTests -B'
                     }
                 }
-
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
                     echo "Build complete. Version: ${env.APP_VERSION}"
@@ -126,8 +104,6 @@ pipeline {
                 }
             }
         }
-
-        // ── Stage 2: Run Tests ────────────────────────────────────────────
         stage('Test') {
             steps {
                 dir('backend') {
@@ -148,8 +124,6 @@ pipeline {
                 }
             }
         }
-
-        // ── Stage 3: Upload JAR to Nexus ──────────────────────────────────
         stage('Upload to Nexus') {
             steps {
                 dir('backend') {
@@ -162,7 +136,6 @@ pipeline {
                 }
 
                 script {
-                    // Build URL directly from BUILD_TYPE — no env variable indirection
                     def nexusBase = (env.BUILD_TYPE == 'RELEASE')
                             ? 'http://192.168.56.3:8081/repository/tire-testing-releases'
                             : 'http://192.168.56.3:8081/repository/tire-testing-snapshots'
@@ -170,7 +143,6 @@ pipeline {
                     def checkUrl = (env.BUILD_TYPE == 'RELEASE')
                             ? "${nexusBase}/com/myproject/tire-testing/${env.APP_VERSION}/tire-testing-${env.APP_VERSION}.jar"
                             : "${nexusBase}/com/myproject/tire-testing/${env.APP_VERSION}/maven-metadata.xml"
-
                     def status = sh(
                             script: """
                             curl -s -o /dev/null -w "%{http_code}" \
@@ -179,10 +151,8 @@ pipeline {
                         """,
                             returnStdout: true
                     ).trim()
-
                     echo "Nexus verification (${env.BUILD_TYPE}): HTTP ${status}"
                     echo "Checked URL: ${checkUrl}"
-
                     if (status != '200') {
                         error("Artifact not found in Nexus (HTTP ${status}). URL: ${checkUrl}")
                     }
@@ -190,17 +160,12 @@ pipeline {
                 }
             }
         }
-
-        // ── Stage 4: Deploy ───────────────────────────────────────────────
-        // dev  → staging  (192.168.56.5) vm4
-        // main → production (192.168.56.4) vm3
         stage('Deploy') {
             steps {
                 script {
                     env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
                     echo "Deploying ${env.BUILD_TYPE} ${env.APP_VERSION} to ${env.DEPLOY_TARGET}..."
                 }
-
                 withCredentials([
                         sshUserPrivateKey(
                                 credentialsId: 'vm-ssh-key',
@@ -226,15 +191,12 @@ pipeline {
                           "sudo /opt/puppetlabs/bin/puppet agent --test --no-daemonize; echo Puppet run complete"
                     """
                 }
-
                 script {
                     env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
                     echo "Deploy complete at: ${env.DEPLOY_END}"
                 }
             }
         }
-
-        // ── Stage 5: Health Check ──────────────────────────────────────────
         stage('Health Check') {
             steps {
                 sh """
@@ -251,25 +213,20 @@ pipeline {
             if [ -z "\$HTTP_CODE" ]; then
               HTTP_CODE="000"
             fi
-
             echo "  Attempt \$i/\$MAX_ATTEMPTS → HTTP \$HTTP_CODE"
-
             if [ "\$HTTP_CODE" = "200" ]; then
               echo "Application is healthy on ${env.DEPLOY_TARGET}!"
               exit 0
             fi
-
             if [ \$i -lt \$MAX_ATTEMPTS ]; then
               sleep \$SLEEP_SECS
             fi
           done
-
           echo "FAILED: Application did not become healthy within \$(( MAX_ATTEMPTS * SLEEP_SECS + 20 ))s"
           exit 1
         """
             }
         }
-        // ── Stage 6: Log DORA Metrics ──────────────────────────────────────
         stage('Log DORA Metrics') {
             steps {
                 sh """
@@ -290,9 +247,7 @@ ${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},${env.APP_VERSION},${env.
                 """
             }
         }
-
     }
-
     post {
         failure {
             sh """
@@ -303,7 +258,6 @@ ${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),${env.APP_VE
               echo "FAILED deployment recorded in DORA log"
             """
         }
-
         success {
             echo "Pipeline 1 (Traditional) — ${env.BUILD_TYPE} ${env.APP_VERSION} deployed to ${env.DEPLOY_TARGET}."
         }
