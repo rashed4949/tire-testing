@@ -47,11 +47,10 @@
         state: started
         restart_policy: unless-stopped
         ports:
-          - "8080:8080"    # React frontend + REST API
-          - "8081:8081"    # Actuator (health + Prometheus)
+          - "8080:8080"
+          - "8081:8081"
         env:
-          # Database — RDS endpoint from Terraform output
-          DB_URL:      "{{ db_url }}"
+          DB_URL:     "jdbc:postgresql://172.17.0.1:5432/tire_testing"
           DB_USER:     "{{ db_user }}"
           DB_PASSWORD: "{{ db_password }}"
           # Spring Boot config via environment

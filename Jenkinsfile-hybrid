@@ -1,0 +1,198 @@
+pipeline {
+    agent any
+
+    environment {
+        // ── AWS ECR Configuration ─────────────────────────────────────────
+        // Get AWS_ACCOUNT_ID from: aws sts get-caller-identity --query Account --output text
+        // Get ECR_URL from: terraform output ecr_url
+        AWS_ACCOUNT_ID = "YOUR_AWS_ACCOUNT_ID"
+        AWS_REGION     = "eu-central-1"
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_NAME     = "tire-testing"
+
+        // ── Git tracking for DORA ─────────────────────────────────────────
+        COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        COMMIT_TIME = sh(script: 'git log -1 --format=%cI', returnStdout: true).trim()
+        IMAGE_TAG   = "${env.COMMIT_HASH}-${env.BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Track Start') {
+            steps {
+                script {
+                    env.PIPELINE_START = sh(
+                        script: 'date -Iseconds',
+                        returnStdout: true
+                    ).trim()
+
+                    echo "╔══════════════════════════════════════════════════╗"
+                    echo "║  Tire Testing — Modern Hybrid Pipeline           ║"
+                    echo "╚══════════════════════════════════════════════════╝"
+                    echo "Commit   : ${COMMIT_HASH}"
+                    echo "Tag      : ${IMAGE_TAG}"
+                    echo "Started  : ${env.PIPELINE_START}"
+                }
+            }
+        }
+
+        stage('Build — JAR + React') {
+            // Same as Pipeline 1: frontend-maven-plugin builds React,
+            // maven-resources-plugin copies to static/, spring-boot packages fat JAR
+            steps {
+                dir('backend') {
+                    sh 'mvn clean package -DskipTests -B --no-transfer-progress'
+                }
+                script {
+                    env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
+                    echo "Build finished at: ${env.BUILD_END}"
+                }
+            }
+        }
+
+        stage('Test') {
+            // Uses H2 in-memory — no PostgreSQL needed
+            steps {
+                dir('backend') {
+                    sh 'mvn test -B --no-transfer-progress'
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: 'backend/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            // Build from repo ROOT so Dockerfile can access both backend/ and frontend/
+            steps {
+                sh """
+                  echo "Building Docker image: ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+                  docker build \
+                    --tag ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                    --label "git-commit=${COMMIT_HASH}" \
+                    --label "build-number=${BUILD_NUMBER}" \
+                    --label "built-at=${env.PIPELINE_START}" \
+                    .
+
+                  echo "Image built successfully"
+                  docker images | grep tire-testing
+                """
+            }
+        }
+
+        stage('Push to ECR') {
+            // Jenkins EC2 has IAM role — no static AWS credentials needed
+            steps {
+                sh """
+                  echo "Authenticating Docker with ECR..."
+                  aws ecr get-login-password --region ${AWS_REGION} \
+                    | docker login --username AWS \
+                    --password-stdin ${ECR_REGISTRY}
+
+                  echo "Pushing image to ECR..."
+                  docker push ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+
+                  echo "✓ Pushed: ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                """
+            }
+        }
+
+        stage('Deploy via Ansible') {
+            steps {
+                script { env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim() }
+
+                sh """
+                  ansible-playbook ansible/deploy-hybrid.yml \
+                    --extra-vars "image_tag=${IMAGE_TAG}" \
+                    --extra-vars "ecr_registry=${ECR_REGISTRY}" \
+                    --extra-vars "db_user=tire_user" \
+                    --extra-vars "db_password=thesis_pass"
+                """
+
+                script { env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim() }
+            }
+        }
+
+        stage('Log DORA Metrics') {
+            steps {
+                sh """
+                  mkdir -p /var/log/dora
+                  echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END},${env.DEPLOY_START},${env.DEPLOY_END},SUCCESS,hybrid" \
+                    >> /var/log/dora/metrics.csv
+
+                  echo "DORA metrics logged:"
+                  tail -3 /var/log/dora/metrics.csv
+                """
+            }
+        }
+
+        stage('Grafana Deployment Annotation') {
+            // Optional: marks deployment on Grafana time-series charts
+            // Skip if you haven't set up grafana-api-key credential yet
+            when {
+                expression {
+                    return currentBuild.result == null || currentBuild.result == 'SUCCESS'
+                }
+            }
+            steps {
+                script {
+                    try {
+                        withCredentials([string(credentialsId: 'grafana-api-key', variable: 'GRAFANA_KEY')]) {
+                            def MONITORING_IP = sh(
+                                script: "ansible hybrid-prod --list-hosts 2>/dev/null | grep -v 'hosts' | tr -d ' ' | head -1 | awk -F'.' '{print \$1\".0.0.1\"}' || echo ''",
+                                returnStdout: true
+                            ).trim()
+
+                            sh """
+                              curl -s -X POST \
+                                "http://MONITORING_PRIVATE_IP:3000/api/annotations" \
+                                -H "Content-Type: application/json" \
+                                -H "Authorization: Bearer \$GRAFANA_KEY" \
+                                -d '{
+                                  "text": "Deployed ${IMAGE_TAG} (${COMMIT_HASH})",
+                                  "tags": ["deployment","hybrid","tire-testing"],
+                                  "time": '$(date +%s%3N)'
+                                }' || echo "Grafana annotation skipped (not critical)"
+                            """
+                        }
+                    } catch(err) {
+                        echo "Grafana annotation failed (not critical): ${err}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            sh """
+              mkdir -p /var/log/dora
+              echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},$(date -Iseconds),FAILED,hybrid" \
+                >> /var/log/dora/metrics.csv
+              echo "FAILED: logged to DORA CSV"
+            """
+        }
+
+        success {
+            echo """
+╔══════════════════════════════════════════════════════╗
+║  Deployment SUCCESSFUL                               ║
+║  Image: ${IMAGE_TAG}
+║  App:   http://PROD_EC2_PUBLIC_IP:8080/
+║  Health: http://PROD_EC2_PUBLIC_IP:8081/actuator/health
+╚══════════════════════════════════════════════════════╝
+"""
+        }
+
+        always {
+            // Clean up old Docker images to save disk space
+            sh '''
+              docker image prune -f --filter "until=24h" || true
+            '''
+        }
+    }
+}

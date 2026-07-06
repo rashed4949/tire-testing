@@ -5,7 +5,7 @@ WORKDIR /workspace
 COPY backend/pom.xml backend/pom.xml
 
 
-RUN cd backend && mvn dependency:go-offline -B
+RUN cd backend && mvn dependency:go-offline -B --no-transfer-progress
 
 
 COPY backend/src backend/src
@@ -14,7 +14,7 @@ COPY backend/src backend/src
 COPY frontend frontend
 
 
-RUN cd backend && mvn clean package -DskipTests
+RUN cd backend && mvn clean package -DskipTests -B --no-transfer-progress
 
 # ── Runtime stage ─────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
