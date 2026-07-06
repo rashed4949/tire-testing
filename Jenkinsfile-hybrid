@@ -171,7 +171,7 @@ pipeline {
         failure {
             sh """
               mkdir -p /var/log/dora
-              echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},$(date -Iseconds),FAILED,hybrid" \
+              echo "${COMMIT_HASH},${COMMIT_TIME},${env.PIPELINE_START},${env.BUILD_END ?: ''},${env.DEPLOY_START ?: ''},\$(date -Iseconds),FAILED,hybrid" \
                 >> /var/log/dora/metrics.csv
               echo "FAILED: logged to DORA CSV"
             """
