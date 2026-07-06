@@ -5,7 +5,7 @@ pipeline {
         // ── AWS ECR Configuration ─────────────────────────────────────────
         // Get AWS_ACCOUNT_ID from: aws sts get-caller-identity --query Account --output text
         // Get ECR_URL from: terraform output ecr_url
-        AWS_ACCOUNT_ID = "YOUR_AWS_ACCOUNT_ID"
+        AWS_ACCOUNT_ID = "685368365467"
         AWS_REGION     = "eu-central-1"
         ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME     = "tire-testing"
