@@ -155,7 +155,7 @@ pipeline {
                                 -d '{
                                   "text": "Deployed ${IMAGE_TAG} (${COMMIT_HASH})",
                                   "tags": ["deployment","hybrid","tire-testing"],
-                                  "time": '$(date +%s%3N)'
+                                  "time": '\$(date +%s%3N)'
                                 }' || echo "Grafana annotation skipped (not critical)"
                             """
                         }
