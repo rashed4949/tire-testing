@@ -1,20 +1,24 @@
 ---
 # Deploy Tire Testing — Modern Hybrid Pipeline
-# This playbook runs on the Prod EC2 via SSH from Jenkins EC2
+# Runs on either Prod or Staging (monitoring) EC2 via SSH from Jenkins EC2
+# Target selected via --limit hybrid_prod | hybrid_staging
 
 - name: Deploy Tire Testing Application
-  hosts: hybrid-prod
+  hosts: all
   become: yes
 
   vars:
     # These are passed from Jenkins as --extra-vars
-    ecr_registry: ""        # e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com
-    image_name: "tire-testing"
+    ecr_registry: ""        # e.g. 685368365467.dkr.ecr.eu-central-1.amazonaws.com
+    ecr_repo: "tire-testing-release"   # or tire-testing-snapshot, passed from Jenkins
     image_tag: "latest"
     aws_region: "eu-central-1"
-    db_url: ""
     db_user: "tire_user"
     db_password: ""
+    # DB name differs by target — release=prod uses tire_testing,
+    # snapshot=staging uses tire_testing_staging. Default falls back to
+    # inventory group name so it works either way without extra wiring.
+    db_name: "{{ 'tire_testing' if 'hybrid_prod' in group_names else 'tire_testing_staging' }}"
 
   tasks:
 
@@ -24,11 +28,11 @@
           | docker login --username AWS \
           --password-stdin {{ ecr_registry }}
       changed_when: true
-      # Jenkins EC2 has IAM role, Prod EC2 needs AWS CLI installed (done in user_data)
+      # Both Prod and Monitoring EC2 have IAM roles + AWS CLI installed via user_data
 
     - name: "Step 2 — Pull new Docker image from ECR"
       community.docker.docker_image:
-        name: "{{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+        name: "{{ ecr_registry }}/{{ ecr_repo }}:{{ image_tag }}"
         source: pull
         force_source: yes
       register: pull_result
@@ -43,14 +47,14 @@
     - name: "Step 4 — Start new container"
       community.docker.docker_container:
         name: tire-testing
-        image: "{{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+        image: "{{ ecr_registry }}/{{ ecr_repo }}:{{ image_tag }}"
         state: started
         restart_policy: unless-stopped
         ports:
           - "8080:8080"
           - "8081:8081"
         env:
-          DB_URL:     "jdbc:postgresql://172.17.0.1:5432/tire_testing"
+          DB_URL:     "jdbc:postgresql://172.17.0.1:5432/{{ db_name }}"
           DB_USER:     "{{ db_user }}"
           DB_PASSWORD: "{{ db_password }}"
           # Spring Boot config via environment
@@ -85,6 +89,8 @@
       debug:
         msg:
           - "✓ Application deployed successfully!"
-          - "  Image: {{ ecr_registry }}/{{ image_name }}:{{ image_tag }}"
+          - "  Target: {{ inventory_hostname }} ({{ group_names | join(', ') }})"
+          - "  DB:     {{ db_name }}"
+          - "  Image:  {{ ecr_registry }}/{{ ecr_repo }}:{{ image_tag }}"
           - "  Health: {{ health_result.json.status }}"
           - "  Frontend HTTP: {{ ui_result.status }}"
