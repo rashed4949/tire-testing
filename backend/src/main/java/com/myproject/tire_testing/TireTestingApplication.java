@@ -19,3 +19,4 @@ public class TireTestingApplication {
 // webhook test after SG fix
 // staging redeploy after docker+postgres setup
 // retry staging deploy after docker sdk fix
+// MTTR scenario 3 recovery redeploy
