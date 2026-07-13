@@ -33,3 +33,4 @@ public class TireTestingApplication {
 // test simplified trigger setup
 // retest with working classic token
 // retest with persistent argocd port-forward service
+// final e2e test after db ip fix
