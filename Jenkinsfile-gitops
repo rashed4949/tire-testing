@@ -24,7 +24,7 @@ pipeline {
                         ''',
                         returnStdout: true
                     ).trim()
-                    if (env.GIT_BRANCH_NAME != 'main' && env.GIT_BRANCH_NAME != 'dev') {
+                    if (env.GIT_BRANCH_NAME != 'main-gitops' && env.GIT_BRANCH_NAME != 'dev-gitops') {
                         currentBuild.result = 'NOT_BUILT'
                         error("Branch '${env.GIT_BRANCH_NAME}' is not dev or main — skipping pipeline.")
                     }
@@ -37,7 +37,7 @@ pipeline {
                 script {
                     env.PIPELINE_START = sh(script: 'date -Iseconds', returnStdout: true).trim()
 
-                    if (env.GIT_BRANCH_NAME == 'main') {
+                    if (env.GIT_BRANCH_NAME == 'main-gitops') {
                         env.BUILD_TYPE    = 'RELEASE'
                         env.ECR_REPO      = 'tire-testing-gitops-release'
                         env.GITOPS_PATH   = 'overlays/production'
