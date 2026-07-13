@@ -31,3 +31,4 @@ public class TireTestingApplication {
 // retest after removing legacy webhook and unchecking github hook trigger
 // retest after removing legacy webhook and unchecking github hook trigger
 // test simplified trigger setup
+// retest with working classic token
