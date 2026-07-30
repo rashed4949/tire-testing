@@ -181,7 +181,8 @@ pipeline {
             echo "Pipeline 2 (Hybrid) — ${env.BUILD_TYPE} ${env.IMAGE_TAG} deployed to ${env.DEPLOY_TARGET} (${env.DEPLOY_IP})."
         }
         always {
-            sh 'docker image prune -f --filter "until=24h" || true'
+            sh 'docker container prune -f || true'
+            sh 'docker image prune -af || true'
         }
     }
 }
