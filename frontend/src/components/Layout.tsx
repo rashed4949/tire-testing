@@ -44,7 +44,7 @@ export default function Layout() {
           <Typography variant="h6" sx={{ color: '#FFD100', fontWeight: 800, letterSpacing: 1 }}>
             🔧 TireTest  DEV1
           </Typography>
-          <Typography variant="caption" sx={<{ color: 'rgba(255,255,255,0.5)' }}>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
            ABC Tire Company
           </Typography>
         </Box>
