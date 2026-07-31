@@ -200,7 +200,8 @@ pipeline {
         }
         always {
             sh 'rm -rf gitops-tmp'
-            sh 'docker image prune -f --filter "until=24h" || true'
+            sh 'docker container prune -f || true'
+            sh 'docker image prune -af || true'
         }
     }
 }
