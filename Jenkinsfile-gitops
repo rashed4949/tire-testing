@@ -135,7 +135,7 @@ pipeline {
         stage('Wait for ArgoCD Sync') {
             steps {
                 sh """
-                  argocd app sync ${ARGOCD_APP} --server localhost:8443 --insecure
+                  x app sync ${ARGOCD_APP} --server localhost:8443 --insecure
                   argocd app wait ${ARGOCD_APP} --server localhost:8443 --insecure --health --timeout 300
                 """
                 script { env.DEPLOY_END = sh(script: 'date -Iseconds', returnStdout: true).trim() }
