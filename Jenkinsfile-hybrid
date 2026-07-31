@@ -18,7 +18,7 @@ pipeline {
                 script {
                     env.GIT_BRANCH_NAME = sh(
                         script: '''
-                         xxxxx git name-rev --name-only HEAD \
+                         xxx git name-rev --name-only HEAD \
                           | sed 's|remotes/origin/||' \
                           | sed 's|~.*||'
                         ''',
