@@ -90,7 +90,7 @@ pipeline {
         stage('Docker Build') {
             steps {
                 sh """
-                  x build \
+                  docker build \
                     --tag ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG} \
                     --label "git-commit=${COMMIT_HASH}" \
                     --label "build-number=${BUILD_NUMBER}" \
