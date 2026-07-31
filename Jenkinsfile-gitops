@@ -70,7 +70,7 @@ pipeline {
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    sh 'x package -DskipTests -B --no-transfer-progress'
+                    sh 'mvn clean package -DskipTests -B --no-transfer-progress'
                 }
                 script { env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim() }
             }
