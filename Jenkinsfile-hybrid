@@ -68,7 +68,7 @@ pipeline {
         stage('Build — JAR + React') {
             steps {
                 dir('backend') {
-                    sh 'mvn clean package -DskipTests -B --no-transfer-progress'
+                    sh 'x package -DskipTests -B --no-transfer-progress'
                 }
                 script {
                     env.BUILD_END = sh(script: 'date -Iseconds', returnStdout: true).trim()
@@ -92,7 +92,7 @@ pipeline {
         stage('Docker Build') {
             steps {
                 sh """
-                  x build \
+                  docker build \
                     --tag ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG} \
                     --label "git-commit=${COMMIT_HASH}" \
                     --label "build-number=${BUILD_NUMBER}" \
