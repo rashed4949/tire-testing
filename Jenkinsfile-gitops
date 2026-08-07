@@ -114,20 +114,38 @@ pipeline {
                 script { env.DEPLOY_START = sh(script: 'date -Iseconds', returnStdout: true).trim() }
 
                 withCredentials([usernamePassword(credentialsId: 'github-creds', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
-                    sh """
-                      rm -rf gitops-tmp
-                      git clone https://\$GIT_USER:\$GIT_TOKEN@github.com/rashed4949/tire-testing-gitops-config gitops-tmp
-                      cd gitops-tmp/${GITOPS_PATH}
+                    retry(3) {
+                        sh """
+                          rm -rf gitops-tmp
+                          git clone https://\$GIT_USER:\$GIT_TOKEN@github.com/rashed4949/tire-testing-gitops-config gitops-tmp
+                          cd gitops-tmp/${GITOPS_PATH}
 
-                      # Update the image tag in the overlay's patch file
-                      sed -i "s|${ECR_REPO}:.*|${ECR_REPO}:${IMAGE_TAG}|" patch-image.yaml
+                          # Update the image tag in the overlay's patch file
+                          sed -i "s|${ECR_REPO}:.*|${ECR_REPO}:${IMAGE_TAG}|" patch-image.yaml
 
-                      git config user.email "jenkins@thesis.local"
-                      git config user.name "Jenkins CI"
-                      git add patch-image.yaml
-                      git commit -m "Deploy ${ECR_REPO}:${IMAGE_TAG} (${COMMIT_HASH}) to ${K8S_NAMESPACE}" || echo "No changes to commit"
-                      git push
-                    """
+                          git config user.email "jenkins@thesis.local"
+                          git config user.name "Jenkins CI"
+                          git add patch-image.yaml
+                          git commit -m "Deploy ${ECR_REPO}:${IMAGE_TAG} (${COMMIT_HASH}) to ${K8S_NAMESPACE}" || echo "No changes to commit"
+
+                          # Retry-safe push: rebase onto latest origin/main first (in case another
+                          # run landed in between or a prior attempt partially succeeded), then push.
+                          # A short sleep rides out transient GitHub-side errors like
+                          # 'fatal error in commit_refs'.
+                          push_ok=false
+                          for i in 1 2 3; do
+                            git fetch origin main
+                            if git rebase origin/main && git push origin HEAD:main; then
+                              push_ok=true
+                              break
+                            fi
+                            echo "Push attempt \$i failed, retrying in 5s..."
+                            git rebase --abort || true
+                            sleep 5
+                          done
+                          \$push_ok
+                        """
+                    }
                 }
             }
         }
