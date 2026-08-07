@@ -45,7 +45,7 @@ export default function Layout() {
             🔧 TireTest DEV
           </Typography>
           <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
-           ABC Tire Company
+           AC Tire Company
           </Typography>
         </Box>
         <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
